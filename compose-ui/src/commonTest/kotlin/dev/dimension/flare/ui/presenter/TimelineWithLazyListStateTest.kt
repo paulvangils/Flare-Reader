@@ -105,11 +105,8 @@ class TimelineWithLazyListStateTest {
                         }
                     },
                 )
-            val scrollState =
-                LazyStaggeredGridState(
-                    initialFirstVisibleItemIndex = 3,
-                    initialFirstVisibleItemScrollOffset = 19,
-                )
+            val scrollState = LazyStaggeredGridState(initialFirstVisibleItemIndex = 3)
+            scrollState.requestScrollToItem(3, 19)
             val states = mutableListOf<TimelineWithLazyListState>()
             val job =
                 launch {
