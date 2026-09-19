@@ -22,11 +22,8 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Set up JDK
-        uses: actions/setup-java@v5
-        with:
-          distribution: jetbrains
-          java-version: 25
+      - name: Show Java runtime
+        run: java -version
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
