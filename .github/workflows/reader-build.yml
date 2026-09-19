@@ -25,13 +25,26 @@ jobs:
       - name: Show Java runtime
         run: java -version
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: platform-tools
 
       - name: Run timeline regression tests
-        run: ./gradlew :compose-ui:jvmTest --stacktrace
+        run: ./gradlew :compose-ui:jvmTest --info --stacktrace
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flare-reader-test-reports
+          path: |
+            compose-ui/build/test-results/jvmTest/
+            compose-ui/build/reports/tests/jvmTest/
+          if-no-files-found: ignore
 
       - name: Build debug APK
         env:
