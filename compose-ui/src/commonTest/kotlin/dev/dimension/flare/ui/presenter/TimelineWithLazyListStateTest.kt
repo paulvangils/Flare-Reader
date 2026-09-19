@@ -83,7 +83,7 @@ class TimelineWithLazyListStateTest {
                         PagingConfig(
                             pageSize = 5,
                             initialLoadSize = 5,
-                            prefetchDistance = 0,
+                            prefetchDistance = 1,
                             enablePlaceholders = false,
                         ),
                     pagingSourceFactory = {
