@@ -3,12 +3,16 @@ package dev.dimension.flare.ui.presenter
 import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.paging.LoadState
 import androidx.paging.LoadStates
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
 import androidx.paging.PagingData
+import androidx.paging.PagingSource
 import androidx.paging.compose.collectAsLazyPagingItems
 import app.cash.molecule.RecompositionMode
 import app.cash.molecule.moleculeFlow
 import dev.dimension.flare.common.PagingState
 import dev.dimension.flare.common.isRefreshing
+import dev.dimension.flare.common.refreshSuspend
 import dev.dimension.flare.common.toPagingState
 import dev.dimension.flare.model.AccountType
 import dev.dimension.flare.ui.model.UiTimelineV2
@@ -19,6 +23,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -33,6 +38,126 @@ import kotlin.time.Instant
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TimelineWithLazyListStateTest {
+
+    @Test
+    fun refreshFromStaleTopRestoresThePreviouslyVisiblePost() =
+        withTimelineState(
+            initialIndex = 0,
+            onRefresh = { pages ->
+                pages.value = page(-3..1)
+            },
+        ) { _, states, scrollState ->
+            assertEquals(0, scrollState.firstVisibleItemIndex)
+            assertEquals("post-0", assertIs<PagingState.Success<UiTimelineV2>>(states.last().listState).peek(0)?.itemKey)
+
+            states.last().refreshSync()
+            runCurrent()
+
+            assertEquals(3, scrollState.firstVisibleItemIndex, "Refresh must keep the old top post visible")
+            assertEquals(3, states.last().newPostsCount, "Prepended posts should remain unread after restoring the anchor")
+            assertTrue(states.last().showNewToots)
+        }
+
+    @Test
+    fun refreshLoadsContinuationPagesUntilTheOldAnchorCanBeRestored() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            var timeline = (0..40).toList()
+            var generation = 0
+            val loadedPages = mutableListOf<Pair<Int, Int>>()
+
+            fun item(index: Int): UiTimelineV2 =
+                UiTimelineV2.Feed(
+                    title = "post-$index",
+                    description = null,
+                    url = "https://example.com/posts/$index",
+                    createdAt = Instant.fromEpochMilliseconds(0).toUi(),
+                    source = UiTimelineV2.Feed.Source(name = "test", icon = null),
+                    accountType = AccountType.Guest,
+                    itemKey = "post-$index",
+                )
+
+            val pager =
+                Pager(
+                    config =
+                        PagingConfig(
+                            pageSize = 5,
+                            initialLoadSize = 5,
+                            prefetchDistance = 0,
+                            enablePlaceholders = false,
+                        ),
+                    pagingSourceFactory = {
+                        val sourceGeneration = generation++
+                        val sourceItems = timeline.toList()
+                        object : PagingSource<Int, UiTimelineV2>() {
+                            override fun getRefreshKey(state: androidx.paging.PagingState<Int, UiTimelineV2>): Int? = null
+
+                            override suspend fun load(params: LoadParams<Int>): LoadResult<Int, UiTimelineV2> {
+                                val start = params.key ?: 0
+                                val end = minOf(start + params.loadSize, sourceItems.size)
+                                loadedPages += sourceGeneration to start
+                                return LoadResult.Page(
+                                    data = sourceItems.subList(start, end).map(::item),
+                                    prevKey = null,
+                                    nextKey = end.takeIf { it < sourceItems.size },
+                                )
+                            }
+                        }
+                    },
+                )
+            val scrollState =
+                LazyStaggeredGridState(
+                    initialFirstVisibleItemIndex = 3,
+                    initialFirstVisibleItemScrollOffset = 19,
+                )
+            val states = mutableListOf<TimelineWithLazyListState>()
+            val job =
+                launch {
+                    moleculeFlow(RecompositionMode.Immediate) {
+                        val pagingState = pager.flow.collectAsLazyPagingItems().toPagingState()
+                        val baseState =
+                            object : TimelineItemPresenter.State {
+                                override val listState = pagingState
+                                override val isRefreshing = pagingState.isRefreshing
+
+                                override fun refreshSync() = Unit
+
+                                override suspend fun refreshSuspend() {
+                                    pagingState.refreshSuspend()
+                                }
+                            }
+                        rememberTimelineWithLazyListState(baseState, scrollState)
+                    }.collect { states += it }
+                }
+            try {
+                advanceUntilIdle()
+                assertEquals("post-3", assertIs<PagingState.Success<UiTimelineV2>>(states.last().listState).peek(3)?.itemKey)
+
+                // Twelve new posts exceed the five-item refresh page. The old anchor (post-3)
+                // is now at index 15 and can only be found after three continuation loads.
+                timeline = (-12 until 0).toList() + (0..40).toList()
+                val refreshGeneration = generation
+                states.last().refreshSync()
+                advanceUntilIdle()
+
+                val refreshed = assertIs<PagingState.Success<UiTimelineV2>>(states.last().listState)
+                assertEquals("post--12", refreshed.peek(0)?.itemKey)
+                assertEquals("post-3", refreshed.peek(15)?.itemKey)
+                assertEquals(15, scrollState.firstVisibleItemIndex)
+                assertEquals(19, scrollState.firstVisibleItemScrollOffset)
+                assertEquals(12, states.last().newPostsCount)
+                assertTrue(states.last().showNewToots)
+                assertEquals(
+                    listOf(0, 5, 10, 15),
+                    loadedPages.filter { it.first == refreshGeneration }.map { it.second },
+                    "Refresh should keep appending pages until the old anchor key is loaded",
+                )
+            } finally {
+                job.cancelAndJoin()
+                Dispatchers.resetMain()
+            }
+        }
+
     @Test
     fun newHeadShowsBannerWithoutReplacingScrollState() =
         withTimelineState { pages, states, scrollState ->
@@ -318,6 +443,7 @@ class TimelineWithLazyListStateTest {
 
     private fun withTimelineState(
         initialIndex: Int = 1,
+        onRefresh: suspend (MutableStateFlow<PagingData<UiTimelineV2>>) -> Unit = {},
         block: suspend TestScope.(
             MutableStateFlow<PagingData<UiTimelineV2>>,
             List<TimelineWithLazyListState>,
@@ -339,7 +465,9 @@ class TimelineWithLazyListStateTest {
 
                             override fun refreshSync() = Unit
 
-                            override suspend fun refreshSuspend() = Unit
+                            override suspend fun refreshSuspend() {
+                                onRefresh(pages)
+                            }
                         }
                     rememberTimelineWithLazyListState(baseState, scrollState)
                 }.collect { states += it }
