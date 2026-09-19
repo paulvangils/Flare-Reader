@@ -22,7 +22,7 @@ plugins {
 
 flare {
     namespace = "dev.dimension.flare"
-    applicationId = "dev.dimension.flare"
+    applicationId = "dev.dimension.flare.reader"
 }
 
 // START Non-FOSS component
