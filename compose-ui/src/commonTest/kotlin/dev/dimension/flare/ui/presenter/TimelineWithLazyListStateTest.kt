@@ -14,6 +14,8 @@ import dev.dimension.flare.common.PagingState
 import dev.dimension.flare.common.isRefreshing
 import dev.dimension.flare.common.refreshSuspend
 import dev.dimension.flare.common.toPagingState
+import dev.dimension.flare.data.datastore.model.ReaderTimelinePosition
+import dev.dimension.flare.data.repository.ReaderPositionStore
 import dev.dimension.flare.model.AccountType
 import dev.dimension.flare.ui.model.UiTimelineV2
 import dev.dimension.flare.ui.render.toUi
@@ -149,6 +151,109 @@ class TimelineWithLazyListStateTest {
                     loadedPages.filter { it.first == refreshGeneration }.map { it.second },
                     "Refresh should keep appending pages until the old anchor key is loaded",
                 )
+            } finally {
+                job.cancelAndJoin()
+                Dispatchers.resetMain()
+            }
+        }
+
+    @Test
+    fun persistedPositionLoadsContinuationPagesAndRestoresAcrossLaunch() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            val loadedPages = mutableListOf<Int>()
+            val positionStore =
+                FakeReaderPositionStore(
+                    ReaderTimelinePosition(
+                        timelineId = "home",
+                        itemKey = "post-18",
+                        scrollOffset = 23,
+                    ),
+                )
+
+            fun item(index: Int): UiTimelineV2 =
+                UiTimelineV2.Feed(
+                    title = "post-$index",
+                    description = null,
+                    url = "https://example.com/posts/$index",
+                    createdAt = Instant.fromEpochMilliseconds(0).toUi(),
+                    source = UiTimelineV2.Feed.Source(name = "test", icon = null),
+                    accountType = AccountType.Guest,
+                    itemKey = "post-$index",
+                )
+
+            val pager =
+                Pager(
+                    config =
+                        PagingConfig(
+                            pageSize = 5,
+                            initialLoadSize = 5,
+                            prefetchDistance = 1,
+                            enablePlaceholders = false,
+                        ),
+                    pagingSourceFactory = {
+                        object : PagingSource<Int, UiTimelineV2>() {
+                            override fun getRefreshKey(state: androidx.paging.PagingState<Int, UiTimelineV2>): Int? = null
+
+                            override suspend fun load(params: LoadParams<Int>): LoadResult<Int, UiTimelineV2> {
+                                val start = params.key ?: 0
+                                val sourceItems = (0..40).toList()
+                                val end = minOf(start + params.loadSize, sourceItems.size)
+                                loadedPages += start
+                                return LoadResult.Page(
+                                    data = sourceItems.subList(start, end).map(::item),
+                                    prevKey = null,
+                                    nextKey = end.takeIf { it < sourceItems.size },
+                                )
+                            }
+                        }
+                    },
+                )
+            val scrollState = LazyStaggeredGridState()
+            val states = mutableListOf<TimelineWithLazyListState>()
+            val job =
+                launch {
+                    moleculeFlow(RecompositionMode.Immediate) {
+                        val pagingState = pager.flow.collectAsLazyPagingItems().toPagingState()
+                        val baseState =
+                            object : TimelineItemPresenter.State {
+                                override val listState = pagingState
+                                override val isRefreshing = pagingState.isRefreshing
+
+                                override fun refreshSync() = Unit
+
+                                override suspend fun refreshSuspend() {
+                                    pagingState.refreshSuspend()
+                                }
+                            }
+                        rememberTimelineWithLazyListState(
+                            baseState = baseState,
+                            lazyListState = scrollState,
+                            timelineId = "home",
+                            readerPositionStore = positionStore,
+                        )
+                    }.collect { states += it }
+                }
+
+            try {
+                advanceUntilIdle()
+
+                val loaded = assertIs<PagingState.Success<UiTimelineV2>>(states.last().listState)
+                assertEquals("post-18", loaded.peek(18)?.itemKey)
+                assertEquals(18, scrollState.firstVisibleItemIndex)
+                assertEquals(23, scrollState.firstVisibleItemScrollOffset)
+                assertEquals(18, states.last().newPostsCount)
+                assertTrue(states.last().showNewToots)
+                assertTrue(
+                    listOf(0, 5, 10, 15).all { it in loadedPages },
+                    "V2 must append enough pages to find the persisted itemKey",
+                )
+
+                // Once restored, a deliberate new resting position becomes the persisted resume point.
+                scrollState.requestScrollToItem(20, 7)
+                runCurrent()
+                assertEquals("post-20", positionStore.position?.itemKey)
+                assertEquals(7, positionStore.position?.scrollOffset)
             } finally {
                 job.cancelAndJoin()
                 Dispatchers.resetMain()
@@ -475,6 +580,35 @@ class TimelineWithLazyListStateTest {
         } finally {
             job.cancelAndJoin()
             Dispatchers.resetMain()
+        }
+    }
+
+    private class FakeReaderPositionStore(
+        initialPosition: ReaderTimelinePosition? = null,
+    ) : ReaderPositionStore {
+        var position: ReaderTimelinePosition? = initialPosition
+            private set
+
+        override suspend fun getPosition(timelineId: String): ReaderTimelinePosition? =
+            position?.takeIf { it.timelineId == timelineId }
+
+        override suspend fun savePosition(
+            timelineId: String,
+            itemKey: String,
+            scrollOffset: Int,
+        ) {
+            position =
+                ReaderTimelinePosition(
+                    timelineId = timelineId,
+                    itemKey = itemKey,
+                    scrollOffset = scrollOffset,
+                )
+        }
+
+        override suspend fun clearPosition(timelineId: String) {
+            if (position?.timelineId == timelineId) {
+                position = null
+            }
         }
     }
 
