@@ -375,8 +375,8 @@ internal fun rememberTimelineWithLazyListState(
                         return@repeat
                     }
 
-                    pagingState = found!!.first
-                    itemIndex = found!!.second
+                    pagingState = found.first
+                    itemIndex = found.second
                     leadingItemCount = currentLeadingItemCount(pagingState, lazyListState)
                     newPostCount = maxOf(newPostCount, itemIndex)
                     restored =
