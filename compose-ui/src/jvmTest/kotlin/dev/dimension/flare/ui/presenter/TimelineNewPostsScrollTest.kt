@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.unit.dp
@@ -22,7 +23,9 @@ import dev.dimension.flare.common.toPagingState
 import dev.dimension.flare.model.AccountType
 import dev.dimension.flare.ui.model.UiTimelineV2
 import dev.dimension.flare.ui.render.toUi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import org.junit.Rule
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -32,6 +35,79 @@ import kotlin.time.Instant
 class TimelineNewPostsScrollTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun refreshSurvivesALatePagingGenerationThatResetsTheGridToTop() {
+        val pages = MutableStateFlow(page(0..9))
+        val scrollState = LazyStaggeredGridState(initialFirstVisibleItemIndex = 5)
+        lateinit var state: TimelineWithLazyListState
+
+        composeRule.setContent {
+            val refreshScope = rememberCoroutineScope()
+            val pagingState = pages.collectAsLazyPagingItems().toPagingState()
+            val baseState =
+                object : TimelineItemPresenter.State {
+                    override val listState = pagingState
+                    override val isRefreshing = pagingState.isRefreshing
+
+                    override fun refreshSync() = Unit
+
+                    override suspend fun refreshSuspend() {
+                        // First refresh result: three posts were prepended.
+                        pages.value = page(-3..9)
+
+                        // Cache-backed timelines can publish a second generation shortly after
+                        // the network refresh. Reproduce the observed Android failure by having
+                        // that late generation also reset the grid to the newest item.
+                        refreshScope.launch {
+                            delay(100)
+                            pages.value = page(-5..9)
+                            scrollState.requestScrollToItem(0)
+                        }
+                    }
+                }
+            val timeline = rememberTimelineWithLazyListState(baseState, scrollState)
+            SideEffect { state = timeline }
+
+            LazyVerticalStaggeredGrid(
+                columns = StaggeredGridCells.Fixed(1),
+                state = scrollState,
+                modifier = Modifier.size(width = 300.dp, height = 150.dp),
+            ) {
+                pagingState.onSuccess {
+                    items(itemCount, key = itemKey { requireNotNull(it.itemKey) }) {
+                        Box(Modifier.fillMaxWidth().height(100.dp))
+                    }
+                }
+            }
+        }
+
+        composeRule.runOnIdle {
+            scrollState.requestScrollToItem(5, 17)
+        }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals("post-5", scrollState.layoutInfo.visibleItemsInfo.first().key)
+            state.refreshSync()
+        }
+
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            val success = state.listState as? PagingState.Success
+            success?.itemCount == 15 &&
+                scrollState.firstVisibleItemIndex == 10 &&
+                scrollState.firstVisibleItemScrollOffset == 17 &&
+                scrollState.layoutInfo.visibleItemsInfo.any {
+                    it.index == 10 && it.key == "post-5"
+                }
+        }
+
+        composeRule.runOnIdle {
+            assertEquals(10, scrollState.firstVisibleItemIndex)
+            assertEquals(17, scrollState.firstVisibleItemScrollOffset)
+            assertEquals("post-5", scrollState.layoutInfo.visibleItemsInfo.first().key)
+            assertEquals(5, state.newPostsCount)
+        }
+    }
 
     @Test
     fun scrollingRenderedPostsConsumesTheCount() = checkScrolling(leadingHeader = false)
