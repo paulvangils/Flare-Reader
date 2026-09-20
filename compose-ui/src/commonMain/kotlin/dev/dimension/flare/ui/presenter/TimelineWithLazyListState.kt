@@ -176,7 +176,59 @@ internal fun rememberTimelineWithLazyListState(
         } != null
     }
 
+    suspend fun findTimelineItemAcrossPages(itemKey: String): Pair<PagingState.Success<UiTimelineV2>, Int>? {
+        var pagingState = currentBaseState.listState
+        var appendLoads = 0
+
+        while (appendLoads <= MAX_ANCHOR_APPEND_LOADS) {
+            val success = pagingState as? PagingState.Success
+            if (success != null && !pagingState.isRefreshing) {
+                val index = success.indexOfItemKey(itemKey)
+                if (index >= 0) {
+                    return success to index
+                }
+
+                when (success.appendState) {
+                    is LoadState.Error -> return null
+                    is LoadState.Loading -> Unit
+                    is LoadState.NotLoading -> {
+                        if (success.appendState.endOfPaginationReached || success.itemCount == 0) {
+                            return null
+                        }
+                        // A tail read is the normal Paging hint for loading the next page.
+                        // It does not move the LazyStaggeredGrid viewport.
+                        success[success.itemCount - 1]
+                        appendLoads += 1
+                    }
+                }
+            }
+
+            val previousState = pagingState
+            pagingState =
+                withTimeoutOrNull(REFRESH_POSITION_WAIT_TIMEOUT_MS) {
+                    snapshotFlow { currentBaseState.listState }
+                        .first { candidate ->
+                            if (candidate === previousState || candidate.isRefreshing) {
+                                false
+                            } else {
+                                val candidatePaging = candidate as? PagingState.Success
+                                candidatePaging != null &&
+                                    candidatePaging.appendState !is LoadState.Loading
+                            }
+                        }
+                } ?: return null
+        }
+
+        return null
+    }
+
     suspend fun refreshPreservingScrollPosition() {
+        if (restoringReadPosition) {
+            withTimeoutOrNull(REFRESH_POSITION_WAIT_TIMEOUT_MS) {
+                snapshotFlow { restoringReadPosition }.first { !it }
+            }
+        }
+
         val beforeState = currentBaseState
         val beforePagingState = beforeState.listState
         val anchor = captureTimelineScrollAnchor(beforePagingState, lazyListState)
@@ -274,13 +326,141 @@ internal fun rememberTimelineWithLazyListState(
             preservingRefreshPosition = false
         }
     }
+    LaunchedEffect(timelineId, readerPositionStore, lazyListState) {
+        val persistentTimelineId = timelineId ?: return@LaunchedEffect
+        val positionStore = readerPositionStore ?: return@LaunchedEffect
+
+        restoringReadPosition = true
+        initialReadPositionRestored = false
+        positionPersistenceEnabled = false
+
+        val savedPosition = positionStore.getPosition(persistentTimelineId)
+        var restored = savedPosition == null
+
+        if (savedPosition != null) {
+            var found = findTimelineItemAcrossPages(savedPosition.itemKey)
+            if (found != null) {
+                var (pagingState, itemIndex) = found
+                var leadingItemCount = currentLeadingItemCount(pagingState, lazyListState)
+
+                // Everything above the saved item is unread/new from the reader's perspective.
+                newPostCount = maxOf(newPostCount, itemIndex)
+
+                restored =
+                    applyTimelineAnchor(
+                        anchor =
+                            TimelineScrollAnchor(
+                                itemKey = savedPosition.itemKey,
+                                pagingIndex = itemIndex,
+                                leadingItemCount = leadingItemCount,
+                                scrollOffset = savedPosition.scrollOffset,
+                            ),
+                        refreshedIndex = itemIndex,
+                    )
+
+                // A cache/database invalidation can replace the paging generation just after the
+                // first restore. Keep re-applying the persisted key until the generation is quiet.
+                repeat(MAX_RESTORE_GENERATION_RETRIES) {
+                    if (!restored) return@repeat
+                    val restoredAgainst = currentBaseState.listState
+                    delay(RESTORE_POSITION_STABILITY_MS)
+                    val latestState = currentBaseState.listState
+                    if (latestState === restoredAgainst && !latestState.isRefreshing) {
+                        return@repeat
+                    }
+
+                    found = findTimelineItemAcrossPages(savedPosition.itemKey)
+                    if (found == null) {
+                        restored = false
+                        return@repeat
+                    }
+
+                    pagingState = found!!.first
+                    itemIndex = found!!.second
+                    leadingItemCount = currentLeadingItemCount(pagingState, lazyListState)
+                    newPostCount = maxOf(newPostCount, itemIndex)
+                    restored =
+                        applyTimelineAnchor(
+                            anchor =
+                                TimelineScrollAnchor(
+                                    itemKey = savedPosition.itemKey,
+                                    pagingIndex = itemIndex,
+                                    leadingItemCount = leadingItemCount,
+                                    scrollOffset = savedPosition.scrollOffset,
+                                ),
+                            refreshedIndex = itemIndex,
+                        )
+                }
+            }
+        }
+
+        initialReadPositionRestored = true
+        restoringReadPosition = false
+        positionPersistenceEnabled = restored
+
+        if (!restored && savedPosition != null) {
+            // Do not overwrite a valid stored key with the transient newest post when restore
+            // failed because the network/cache was temporarily incomplete. Once the user scrolls
+            // deliberately, that interaction becomes the new authoritative resume position.
+            withTimeoutOrNull(USER_OVERRIDE_WAIT_TIMEOUT_MS) {
+                snapshotFlow { lazyListState.isScrollInProgress }.first { it }
+                snapshotFlow { lazyListState.isScrollInProgress }.first { !it }
+            }?.let {
+                positionPersistenceEnabled = true
+            }
+        }
+    }
+
+    LaunchedEffect(
+        timelineId,
+        readerPositionStore,
+        lazyListState,
+        initialReadPositionRestored,
+        positionPersistenceEnabled,
+    ) {
+        val persistentTimelineId = timelineId ?: return@LaunchedEffect
+        val positionStore = readerPositionStore ?: return@LaunchedEffect
+        if (!initialReadPositionRestored || !positionPersistenceEnabled) {
+            return@LaunchedEffect
+        }
+
+        snapshotFlow {
+            if (
+                preservingRefreshPosition ||
+                restoringReadPosition ||
+                lazyListState.isScrollInProgress
+            ) {
+                null
+            } else {
+                captureTimelineScrollAnchor(currentBaseState.listState, lazyListState)
+                    ?.let { anchor ->
+                        ReaderTimelinePosition(
+                            timelineId = persistentTimelineId,
+                            itemKey = anchor.itemKey,
+                            scrollOffset = anchor.scrollOffset,
+                        )
+                    }
+            }
+        }.distinctUntilChanged()
+            .collect { position ->
+                if (position != null) {
+                    positionStore.savePosition(
+                        timelineId = position.timelineId,
+                        itemKey = position.itemKey,
+                        scrollOffset = position.scrollOffset,
+                    )
+                }
+            }
+    }
+
     return object :
         TimelineWithLazyListState,
         TimelineItemPresenter.State by baseState {
         override val showNewToots = newPostCount > 0
         override val lazyListState = lazyListState
         override val newPostsCount = newPostCount
-        override val isRefreshing = baseState.isRefreshing || preservingRefreshPosition
+        override val isRefreshing =
+            baseState.isRefreshing || preservingRefreshPosition || restoringReadPosition
 
         override fun refreshSync() {
             scope.launch {
@@ -301,6 +481,9 @@ internal fun rememberTimelineWithLazyListState(
 private const val MAX_ANCHOR_APPEND_LOADS = 50
 private const val REFRESH_POSITION_WAIT_TIMEOUT_MS = 30_000L
 private const val REFRESH_POSITION_STABILITY_MS = 1_000L
+private const val RESTORE_POSITION_STABILITY_MS = 750L
+private const val MAX_RESTORE_GENERATION_RETRIES = 4
+private const val USER_OVERRIDE_WAIT_TIMEOUT_MS = 60_000L
 
 private data class TimelineScrollAnchor(
     val itemKey: String,
@@ -347,3 +530,17 @@ private fun captureTimelineScrollAnchor(
 
 private fun PagingState.Success<UiTimelineV2>.indexOfItemKey(itemKey: String): Int =
     (0 until itemCount).indexOfFirst { peek(it)?.itemKey == itemKey }
+
+private fun currentLeadingItemCount(
+    pagingState: PagingState.Success<UiTimelineV2>,
+    lazyListState: LazyStaggeredGridState,
+): Int {
+    for (visibleItem in lazyListState.layoutInfo.visibleItemsInfo.sortedBy { it.index }) {
+        val key = visibleItem.key as? String ?: continue
+        val pagingIndex = pagingState.indexOfItemKey(key)
+        if (pagingIndex >= 0) {
+            return (visibleItem.index - pagingIndex).coerceAtLeast(0)
+        }
+    }
+    return 0
+}
