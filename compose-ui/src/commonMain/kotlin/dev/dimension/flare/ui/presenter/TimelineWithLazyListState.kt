@@ -18,9 +18,14 @@ import androidx.paging.LoadState
 import dev.dimension.flare.common.PagingState
 import dev.dimension.flare.common.isRefreshing
 import dev.dimension.flare.common.onSuccess
+import dev.dimension.flare.data.datastore.model.ReaderTimelinePosition
 import dev.dimension.flare.data.model.tab.UiTimelineTabItem
+import dev.dimension.flare.data.repository.ReaderPositionRepository
+import dev.dimension.flare.data.repository.ReaderPositionStore
+import dev.dimension.flare.di.koinInject
 import dev.dimension.flare.ui.model.UiTimelineV2
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -51,19 +56,36 @@ public fun rememberTimelineItemPresenterWithLazyListState(
     isHomeTimeline: Boolean = false,
     lazyStaggeredGridState: LazyStaggeredGridState = rememberLazyStaggeredGridState(),
 ): TimelineWithLazyListState {
+    val readerPositionRepository by koinInject<ReaderPositionRepository>()
     val baseState by producePresenter("timeline_${item.id}_$isHomeTimeline") {
         remember(item, isHomeTimeline) { TimelineItemPresenter(item, isHomeTimeline) }.invoke()
     }
-    return rememberTimelineWithLazyListState(baseState, lazyStaggeredGridState)
+    return rememberTimelineWithLazyListState(
+        baseState = baseState,
+        lazyListState = lazyStaggeredGridState,
+        timelineId = item.id,
+        readerPositionStore = readerPositionRepository,
+    )
 }
 
 @Composable
 internal fun rememberTimelineWithLazyListState(
     baseState: TimelineItemPresenter.State,
     lazyListState: LazyStaggeredGridState,
+    timelineId: String? = null,
+    readerPositionStore: ReaderPositionStore? = null,
 ): TimelineWithLazyListState {
     var newPostCount by remember { mutableIntStateOf(0) }
     var preservingRefreshPosition by remember { mutableStateOf(false) }
+    var restoringReadPosition by remember(timelineId) {
+        mutableStateOf(timelineId != null && readerPositionStore != null)
+    }
+    var initialReadPositionRestored by remember(timelineId) {
+        mutableStateOf(timelineId == null || readerPositionStore == null)
+    }
+    var positionPersistenceEnabled by remember(timelineId) {
+        mutableStateOf(timelineId == null || readerPositionStore == null)
+    }
     val currentBaseState by rememberUpdatedState(baseState)
     val scope = rememberCoroutineScope()
     val isAtTheTop by remember(lazyListState) {
@@ -83,7 +105,10 @@ internal fun rememberTimelineWithLazyListState(
                 if (keys.isNotEmpty()) {
                     // Count the new prefix before the first previously loaded post.
                     // Scroll indices can already have moved by the time this snapshot arrives.
-                    if (previousKeys.isNotEmpty() && (!isAtTheTop || preservingRefreshPosition)) {
+                    if (
+                        previousKeys.isNotEmpty() &&
+                        (!isAtTheTop || preservingRefreshPosition || restoringReadPosition)
+                    ) {
                         newPostCount += keys.takeWhile { it !in previousKeys }.size
                     }
                     previousKeys = keys.toSet()
@@ -99,6 +124,9 @@ internal fun rememberTimelineWithLazyListState(
                         ?.key
             }.drop(1)
                 .collect { (index, key) ->
+                    if (preservingRefreshPosition || restoringReadPosition) {
+                        return@collect
+                    }
                     // Consume posts on viewport changes, not paging updates whose
                     // new indices may arrive before the grid preserves its position.
                     // A measured item's key also excludes any leading header cards.
@@ -115,8 +143,8 @@ internal fun rememberTimelineWithLazyListState(
                 }
         }
     }
-    LaunchedEffect(isAtTheTop, preservingRefreshPosition) {
-        if (isAtTheTop && !preservingRefreshPosition) {
+    LaunchedEffect(isAtTheTop, preservingRefreshPosition, restoringReadPosition) {
+        if (isAtTheTop && !preservingRefreshPosition && !restoringReadPosition) {
             newPostCount = 0
         }
     }
