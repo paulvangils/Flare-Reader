@@ -33,6 +33,16 @@ jobs:
         with:
           packages: platform-tools
 
+      - name: Prepare stable debug signing
+        run: |
+          base64 -d ci/flare-reader-debug.keystore.b64 > reader-debug.keystore
+          cat > signing.properties <<'EOF'
+          storeFile=reader-debug.keystore
+          storePassword=android
+          keyAlias=flare-reader-debug
+          keyPassword=android
+          EOF
+
       - name: Run timeline regression tests
         run: ./gradlew :compose-ui:jvmTest --info --stacktrace
 
