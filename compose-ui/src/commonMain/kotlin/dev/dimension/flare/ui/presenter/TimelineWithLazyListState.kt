@@ -19,6 +19,7 @@ import dev.dimension.flare.common.PagingState
 import dev.dimension.flare.common.onSuccess
 import dev.dimension.flare.data.model.tab.UiTimelineTabItem
 import dev.dimension.flare.ui.model.UiTimelineV2
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -119,72 +120,126 @@ internal fun rememberTimelineWithLazyListState(
         }
     }
 
+    suspend fun applyTimelineAnchor(
+        anchor: TimelineScrollAnchor,
+        refreshedIndex: Int,
+    ): Boolean {
+        val targetIndex = (refreshedIndex + anchor.leadingItemCount).coerceAtLeast(0)
+        val newlyPrependedPosts = (refreshedIndex - anchor.pagingIndex).coerceAtLeast(0)
+        newPostCount = maxOf(newPostCount, newlyPrependedPosts)
+
+        lazyListState.requestScrollToItem(targetIndex, anchor.scrollOffset)
+
+        // requestScrollToItem is applied on the next remeasure. In the real rendered grid,
+        // layoutInfo may still describe the pre-refresh layout for a short time, so do not
+        // accept "the anchor is visible somewhere" as proof that restoration has happened.
+        return withTimeoutOrNull(REFRESH_POSITION_WAIT_TIMEOUT_MS) {
+            snapshotFlow {
+                val measuredItems = lazyListState.layoutInfo.visibleItemsInfo
+                val positionApplied =
+                    lazyListState.firstVisibleItemIndex == targetIndex &&
+                        lazyListState.firstVisibleItemScrollOffset == anchor.scrollOffset
+                val measuredAnchorApplied =
+                    measuredItems.isEmpty() ||
+                        measuredItems.any { it.index == targetIndex && it.key == anchor.itemKey }
+                positionApplied && measuredAnchorApplied
+            }.first { it }
+        } != null
+    }
+
     suspend fun refreshPreservingScrollPosition() {
         val beforeState = currentBaseState
-        val anchor = captureTimelineScrollAnchor(beforeState.listState, lazyListState)
+        val beforePagingState = beforeState.listState
+        val anchor = captureTimelineScrollAnchor(beforePagingState, lazyListState)
         preservingRefreshPosition = anchor != null
         try {
             beforeState.refreshSuspend()
             if (anchor == null) return
 
-            // Refresh can replace the loaded page completely. If the previously visible post is
-            // outside that first snapshot, keep loading continuation pages until its stable key
-            // reappears. This avoids treating a refresh as an instruction to jump to "now".
-            var refreshedState =
+            // A cache-backed timeline can publish more than one paging generation for a single
+            // refresh (network refresh -> database invalidation -> new PagingSource generation).
+            // Keep the anchor alive across those generations instead of restoring once and then
+            // allowing a later snapshot to move the viewport to the newest item.
+            var pagingState =
                 withTimeoutOrNull(REFRESH_POSITION_WAIT_TIMEOUT_MS) {
-                    snapshotFlow { currentBaseState }
-                        .first { it !== beforeState && !it.isRefreshing }
-                } ?: return
-            var refreshedIndex =
-                (refreshedState.listState as? PagingState.Success)?.indexOfItemKey(anchor.itemKey) ?: -1
+                    snapshotFlow { currentBaseState.listState }
+                        .first { candidate ->
+                            candidate !== beforePagingState && !candidate.isRefreshing
+                        }
+                } ?: currentBaseState.listState
 
             var appendLoads = 0
-            while (refreshedIndex < 0 && appendLoads < MAX_ANCHOR_APPEND_LOADS) {
-                val pagingState = refreshedState.listState as? PagingState.Success ?: return
-                when (pagingState.appendState) {
-                    is LoadState.Error -> return
-                    is LoadState.Loading -> Unit
-                    is LoadState.NotLoading -> {
-                        if (pagingState.appendState.endOfPaginationReached || pagingState.itemCount == 0) {
-                            return
-                        }
-                        // Reading the current tail sends Paging an append hint without scrolling
-                        // the viewport. Once that load settles we can search the larger snapshot.
-                        pagingState[pagingState.itemCount - 1]
-                        appendLoads += 1
-                    }
+            while (appendLoads <= MAX_ANCHOR_APPEND_LOADS) {
+                val success = pagingState as? PagingState.Success
+                if (success == null || pagingState.isRefreshing) {
+                    val previousState = pagingState
+                    pagingState =
+                        withTimeoutOrNull(REFRESH_POSITION_WAIT_TIMEOUT_MS) {
+                            snapshotFlow { currentBaseState.listState }
+                                .first { candidate ->
+                                    candidate !== previousState && !candidate.isRefreshing
+                                }
+                        } ?: return
+                    continue
                 }
 
-                val previousState = refreshedState
-                refreshedState =
-                    withTimeoutOrNull(REFRESH_POSITION_WAIT_TIMEOUT_MS) {
-                        snapshotFlow { currentBaseState }
-                            .first { candidate ->
-                                if (candidate === previousState || candidate.isRefreshing) {
-                                    false
-                                } else {
-                                    val candidatePaging = candidate.listState as? PagingState.Success
-                                    candidatePaging != null && candidatePaging.appendState !is LoadState.Loading
-                                }
+                val refreshedIndex = success.indexOfItemKey(anchor.itemKey)
+                if (refreshedIndex < 0) {
+                    when (success.appendState) {
+                        is LoadState.Error -> return
+                        is LoadState.Loading -> Unit
+                        is LoadState.NotLoading -> {
+                            if (success.appendState.endOfPaginationReached || success.itemCount == 0) {
+                                return
                             }
-                    } ?: return
-                refreshedIndex =
-                    (refreshedState.listState as? PagingState.Success)?.indexOfItemKey(anchor.itemKey) ?: -1
-            }
-            if (refreshedIndex < 0) return
+                            // Reading the tail emits a Paging append hint without moving the grid.
+                            success[success.itemCount - 1]
+                            appendLoads += 1
+                        }
+                    }
 
-            val targetIndex = (refreshedIndex + anchor.leadingItemCount).coerceAtLeast(0)
-            val newlyPrependedPosts = (refreshedIndex - anchor.pagingIndex).coerceAtLeast(0)
-            newPostCount = maxOf(newPostCount, newlyPrependedPosts)
-            lazyListState.requestScrollToItem(targetIndex, anchor.scrollOffset)
+                    val previousState = pagingState
+                    pagingState =
+                        withTimeoutOrNull(REFRESH_POSITION_WAIT_TIMEOUT_MS) {
+                            snapshotFlow { currentBaseState.listState }
+                                .first { candidate ->
+                                    if (candidate === previousState || candidate.isRefreshing) {
+                                        false
+                                    } else {
+                                        val candidatePaging = candidate as? PagingState.Success
+                                        candidatePaging != null &&
+                                            candidatePaging.appendState !is LoadState.Loading
+                                    }
+                                }
+                        } ?: return
+                    continue
+                }
 
-            // Keep the guard active until the requested position is applied, otherwise the
-            // transient top-of-list frame can clear the unread/new-post count.
-            withTimeoutOrNull(REFRESH_POSITION_WAIT_TIMEOUT_MS) {
-                snapshotFlow {
-                    lazyListState.layoutInfo.visibleItemsInfo.any { it.key == anchor.itemKey } ||
-                        lazyListState.firstVisibleItemIndex == targetIndex
-                }.first { it }
+                if (!applyTimelineAnchor(anchor, refreshedIndex)) {
+                    return
+                }
+
+                // Do not release the preservation guard immediately. Paging + RemoteMediator can
+                // emit another generation after the first restored layout. Require a quiet period;
+                // if a new generation arrives, loop and restore the same stable itemKey again.
+                val restoredAgainst = currentBaseState.listState
+                delay(REFRESH_POSITION_STABILITY_MS)
+                val latestState = currentBaseState.listState
+                val latestSuccess = latestState as? PagingState.Success
+                val latestIndex = latestSuccess?.indexOfItemKey(anchor.itemKey) ?: -1
+
+                if (
+                    latestState === restoredAgainst &&
+                    !latestState.isRefreshing &&
+                    latestIndex >= 0
+                ) {
+                    // Final re-application after the quiet period protects against a late grid
+                    // remeasure using stale pre-refresh indices.
+                    applyTimelineAnchor(anchor, latestIndex)
+                    return
+                }
+
+                pagingState = latestState
             }
         } finally {
             preservingRefreshPosition = false
@@ -216,6 +271,7 @@ internal fun rememberTimelineWithLazyListState(
 
 private const val MAX_ANCHOR_APPEND_LOADS = 50
 private const val REFRESH_POSITION_WAIT_TIMEOUT_MS = 30_000L
+private const val REFRESH_POSITION_STABILITY_MS = 1_000L
 
 private data class TimelineScrollAnchor(
     val itemKey: String,
