@@ -288,7 +288,18 @@ public open class TimelinePresenter : PresenterBase<TimelineState> {
 internal suspend fun shouldRefreshTimelineOnInitialize(
     isHomeTimeline: Boolean,
     refreshHomeTimelineOnLaunch: suspend () -> Boolean,
-): Boolean = !isHomeTimeline || refreshHomeTimelineOnLaunch()
+): Boolean {
+    // Flare Reader must never refresh the home timeline from RemoteMediator initialization.
+    // That refresh happens before the UI-side scroll anchor can be captured and can therefore
+    // replace the cached timeline with "now" while the user is still reading an older position.
+    //
+    // Manual refresh and the UI's periodic auto-refresh still go through
+    // TimelineWithLazyListState, where itemKey + scroll offset are preserved.
+    if (isHomeTimeline) {
+        return false
+    }
+    return true
+}
 
 @Immutable
 public interface TimelineState {
