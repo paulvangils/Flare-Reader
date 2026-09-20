@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - reader-v1
+      - reader-v2
 
 permissions:
   contents: read
@@ -59,7 +60,7 @@ jobs:
       - name: Build debug APK
         env:
           BUILD_NUMBER: ${{ github.run_number }}
-          BUILD_VERSION: reader-v1-${{ github.run_number }}
+          BUILD_VERSION: reader-v2-${{ github.run_number }}
         run: ./gradlew :app:assembleDebug --stacktrace
 
       - name: Upload debug APK
