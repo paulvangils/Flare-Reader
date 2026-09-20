@@ -250,9 +250,9 @@ class TimelineWithLazyListStateTest {
                 )
 
                 // Once restored, a deliberate new resting position becomes the persisted resume point.
-                scrollState.requestScrollToItem(20, 7)
+                scrollState.requestScrollToItem(19, 7)
                 advanceUntilIdle()
-                assertEquals("post-20", positionStore.position?.itemKey)
+                assertEquals("post-19", positionStore.position?.itemKey)
                 assertEquals(7, positionStore.position?.scrollOffset)
             } finally {
                 job.cancelAndJoin()
