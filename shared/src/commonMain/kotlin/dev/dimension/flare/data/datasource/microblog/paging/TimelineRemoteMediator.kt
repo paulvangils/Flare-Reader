@@ -88,11 +88,34 @@ internal open class TimelineRemoteMediator(
                 request = request,
             )
         val sortIdProvider = loader as? SortIdProvider
+        val sortIds =
+            when {
+                sortIdProvider != null -> {
+                    result.data.map { sortIdProvider.sortId(it) }
+                }
+
+                request is PagingRequest.Refresh -> {
+                    val minimumSortId = database.pagingTimelineDao().getMinSortId(pagingKey)
+                    if (
+                        minimumSortId != null &&
+                        minimumSortId >= Long.MIN_VALUE + result.data.size
+                    ) {
+                        val firstSortId = minimumSortId - result.data.size
+                        result.data.indices.map { index -> firstSortId + index }
+                    } else {
+                        emptyList()
+                    }
+                }
+
+                else -> {
+                    emptyList()
+                }
+            }
         val data =
             TimelinePagingMapper.toDb(
                 data = result.data,
                 pagingKey = pagingKey,
-                sortIds = result.data.map { sortIdProvider?.sortId(it) },
+                sortIds = sortIds,
             )
         return PagingResult(
             data = data,
@@ -147,33 +170,11 @@ internal open class TimelineRemoteMediator(
             } else {
                 data
             }
-        val staleTimeline =
-            if (request is PagingRequest.Refresh) {
-                val retainedStatusIds =
-                    dataToSave
-                        .groupBy { it.timeline.pagingKey }
-                        .mapValues { (_, rows) -> rows.mapTo(mutableSetOf()) { it.timeline.statusId } }
-                (retainedStatusIds.keys + loader.pagingKey).flatMap { key ->
-                    database
-                        .pagingTimelineDao()
-                        .getByPagingKey(key)
-                        .filter { it.statusId !in retainedStatusIds[key].orEmpty() }
-                }
-            } else {
-                emptyList()
-            }
+        // Reader timelines are continuity-first: a refresh must prepend/upsert the fresh
+        // page without deleting cached history that the user may not have read yet. The remote
+        // append cursor can then continue through the same history, while unique status IDs keep
+        // overlapping refresh/append pages deduplicated.
         saveToDatabase(database, dataToSave)
-        staleTimeline.groupBy { it.pagingKey }.forEach { (pagingKey, rows) ->
-            database
-                .pagingTimelineDao()
-                .deletePresentationReferences(
-                    pagingKey = pagingKey,
-                    statusIds = rows.map { it.statusId },
-                )
-        }
-        if (staleTimeline.isNotEmpty()) {
-            database.pagingTimelineDao().delete(staleTimeline)
-        }
         enqueuePreTranslation(dataToSave)
     }
 
