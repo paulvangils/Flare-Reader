@@ -86,6 +86,9 @@ internal fun rememberTimelineWithLazyListState(
     var positionPersistenceEnabled by remember(timelineId) {
         mutableStateOf(timelineId == null || readerPositionStore == null)
     }
+    var readBoundaryItemKey by remember(timelineId) {
+        mutableStateOf<String?>(null)
+    }
     val currentBaseState by rememberUpdatedState(baseState)
     val scope = rememberCoroutineScope()
     val isAtTheTop by remember(lazyListState) {
@@ -335,6 +338,7 @@ internal fun rememberTimelineWithLazyListState(
         positionPersistenceEnabled = false
 
         val savedPosition = positionStore.getPosition(persistentTimelineId)
+        readBoundaryItemKey = savedPosition?.itemKey
         var restored = savedPosition == null
 
         if (savedPosition != null) {
@@ -425,31 +429,59 @@ internal fun rememberTimelineWithLazyListState(
         }
 
         snapshotFlow {
-            if (
-                preservingRefreshPosition ||
-                restoringReadPosition ||
-                lazyListState.isScrollInProgress
-            ) {
+            if (preservingRefreshPosition || restoringReadPosition) {
                 null
             } else {
                 captureTimelineScrollAnchor(currentBaseState.listState, lazyListState)
                     ?.let { anchor ->
-                        ReaderTimelinePosition(
-                            timelineId = persistentTimelineId,
+                        ReaderViewportCandidate(
                             itemKey = anchor.itemKey,
-                            scrollOffset = anchor.scrollOffset,
+                            isScrollInProgress = lazyListState.isScrollInProgress,
                         )
                     }
             }
         }.distinctUntilChanged()
-            .collect { position ->
-                if (position != null) {
-                    positionStore.savePosition(
-                        timelineId = position.timelineId,
-                        itemKey = position.itemKey,
-                        scrollOffset = position.scrollOffset,
-                    )
+            .collect { candidate ->
+                if (candidate == null) {
+                    return@collect
                 }
+
+                val pagingState = currentBaseState.listState as? PagingState.Success ?: return@collect
+                val candidateIndex = pagingState.indexOfItemKey(candidate.itemKey)
+                if (candidateIndex < 0) {
+                    return@collect
+                }
+
+                val boundaryKey = readBoundaryItemKey
+                val boundaryIndex =
+                    boundaryKey
+                        ?.let(pagingState::indexOfItemKey)
+                        ?: -1
+                val advancesBoundary =
+                    when {
+                        boundaryKey == null -> true
+                        candidate.itemKey == boundaryKey -> false
+                        boundaryIndex >= 0 -> candidateIndex < boundaryIndex
+                        else -> candidateIndex == 0 && isAtTheTop
+                    }
+                val refinesCurrentBoundary =
+                    candidate.itemKey == boundaryKey && !candidate.isScrollInProgress
+
+                if (!advancesBoundary && !refinesCurrentBoundary) {
+                    return@collect
+                }
+
+                val anchor =
+                    captureTimelineScrollAnchor(currentBaseState.listState, lazyListState)
+                        ?.takeIf { it.itemKey == candidate.itemKey }
+                        ?: return@collect
+
+                positionStore.savePosition(
+                    timelineId = persistentTimelineId,
+                    itemKey = anchor.itemKey,
+                    scrollOffset = anchor.scrollOffset,
+                )
+                readBoundaryItemKey = anchor.itemKey
             }
     }
 
@@ -484,6 +516,11 @@ private const val REFRESH_POSITION_STABILITY_MS = 1_000L
 private const val RESTORE_POSITION_STABILITY_MS = 750L
 private const val MAX_RESTORE_GENERATION_RETRIES = 4
 private const val USER_OVERRIDE_WAIT_TIMEOUT_MS = 60_000L
+
+private data class ReaderViewportCandidate(
+    val itemKey: String,
+    val isScrollInProgress: Boolean,
+)
 
 private data class TimelineScrollAnchor(
     val itemKey: String,
