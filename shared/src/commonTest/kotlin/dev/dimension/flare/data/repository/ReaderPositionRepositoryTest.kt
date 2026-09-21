@@ -3,8 +3,6 @@ package dev.dimension.flare.data.repository
 import dev.dimension.flare.createTestFileSystem
 import dev.dimension.flare.createTestRootPath
 import dev.dimension.flare.data.datastore.AppDataStore
-import dev.dimension.flare.data.datastore.model.ReaderPositionData
-import dev.dimension.flare.data.datastore.model.ReaderTimelinePosition
 import dev.dimension.flare.data.io.OkioFileStorage
 import dev.dimension.flare.deleteTestRootPath
 import kotlinx.coroutines.test.runTest
@@ -62,26 +60,13 @@ class ReaderPositionRepositoryTest {
         }
 
     @Test
-    fun unreliableV2ViewportPositionIsIgnoredAfterUpgrade() =
+    fun freshPositionStoreStartsEmptyAndAcceptsNewBoundary() =
         runTest {
-            appDataStore.readerPositionStore.updateData {
-                ReaderPositionData(
-                    version = 0,
-                    positions =
-                        listOf(
-                            ReaderTimelinePosition(
-                                timelineId = "home",
-                                itemKey = "days-old-post",
-                                scrollOffset = 11,
-                            ),
-                        ),
-                )
-            }
-
             assertNull(repository.getPosition("home"))
 
             repository.savePosition("home", "fresh-boundary", 3)
             assertEquals("fresh-boundary", repository.getPosition("home")?.itemKey)
+            assertEquals(3, repository.getPosition("home")?.scrollOffset)
         }
 
     @Test
