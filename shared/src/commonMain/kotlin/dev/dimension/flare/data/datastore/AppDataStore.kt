@@ -46,7 +46,7 @@ internal class AppDataStore(
 
     val readerPositionStore: DataStore<ReaderPositionData> by lazy {
         createDataStore(
-            name = "reader_positions.pb",
+            name = "reader_positions_v2.pb",
             serializer = protobufSerializer(ReaderPositionData()),
         )
     }
