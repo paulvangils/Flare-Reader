@@ -252,17 +252,23 @@ class TimelineWithLazyListStateTest {
                 // Browsing backwards through already-read posts must never move the read boundary backwards.
                 scrollState.requestScrollToItem(19, 7)
                 advanceUntilIdle()
+                states.last().saveCurrentReadPosition()
+                advanceUntilIdle()
                 assertEquals("post-18", positionStore.position?.itemKey)
                 assertEquals(23, positionStore.position?.scrollOffset)
 
                 // Reading toward newer posts advances the boundary immediately.
                 scrollState.requestScrollToItem(10, 7)
                 advanceUntilIdle()
+                states.last().saveCurrentReadPosition()
+                advanceUntilIdle()
                 assertEquals("post-10", positionStore.position?.itemKey)
                 assertEquals(7, positionStore.position?.scrollOffset)
 
                 // Looking back at older content after catching up must not make the next launch resume there.
                 scrollState.requestScrollToItem(15, 4)
+                advanceUntilIdle()
+                states.last().saveCurrentReadPosition()
                 advanceUntilIdle()
                 assertEquals("post-10", positionStore.position?.itemKey)
                 assertEquals(7, positionStore.position?.scrollOffset)
