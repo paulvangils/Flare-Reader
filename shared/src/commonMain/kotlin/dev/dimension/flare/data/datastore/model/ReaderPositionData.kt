@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 public data class ReaderPositionData(
+    val version: Int = 0,
     val positions: List<ReaderTimelinePosition> = emptyList(),
 )
 
