@@ -330,7 +330,7 @@ class MixedRemoteMediatorTest : RobolectricTest() {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
-    fun timelineRefreshClearsExistingCacheWhenRemoteReturnsEmpty() =
+    fun timelineRefreshRetainsExistingCacheWhenRemoteReturnsEmpty() =
         runTest {
             val cached = feed("https://example.com/cached", 1000L)
             val loader =
@@ -359,7 +359,84 @@ class MixedRemoteMediatorTest : RobolectricTest() {
                 )
 
             assertTrue(mediatorResult is androidx.paging.RemoteMediator.MediatorResult.Success)
-            assertTrue(db.pagingTimelineDao().getByPagingKey(loader.pagingKey).isEmpty())
+            assertEquals(1, db.pagingTimelineDao().getByPagingKey(loader.pagingKey).size)
+        }
+
+    @OptIn(ExperimentalPagingApi::class)
+    @Test
+    fun timelineRefreshPrependsFreshItemsWithoutDroppingCachedHistory() =
+        runTest {
+            val loader =
+                FakeLoader("reader_continuity") { request ->
+                    when (request) {
+                        PagingRequest.Refresh ->
+                            PagingResult(
+                                data =
+                                    listOf(
+                                        feed("https://example.com/new", 5000L),
+                                        feed("https://example.com/old-1", 4000L),
+                                    ),
+                                nextKey = "older",
+                            )
+
+                        is PagingRequest.Append,
+                        is PagingRequest.Prepend,
+                        -> error("No boundary load expected")
+                    }
+                }
+            val cached =
+                listOf(
+                    feed("https://example.com/old-1", 4000L),
+                    feed("https://example.com/old-2", 3000L),
+                    feed("https://example.com/old-3", 2000L),
+                )
+            saveToDatabase(
+                db,
+                TimelinePagingMapper.toDb(
+                    data = cached,
+                    pagingKey = loader.pagingKey,
+                ),
+            )
+            val mediator = TimelineRemoteMediator(loader = loader, database = db, allowLongText = false)
+
+            val mediatorResult =
+                mediator.load(
+                    loadType = LoadType.REFRESH,
+                    state =
+                        PagingState(
+                            pages = emptyList(),
+                            anchorPosition = null,
+                            config = PagingConfig(pageSize = 20),
+                            leadingPlaceholderCount = 0,
+                        ),
+                )
+
+            assertTrue(mediatorResult is androidx.paging.RemoteMediator.MediatorResult.Success)
+
+            val pagingSource = db.pagingTimelineDao().getPagingSource(loader.pagingKey)
+            val page =
+                pagingSource.load(
+                    PagingSource.LoadParams.Refresh(
+                        key = null,
+                        loadSize = 20,
+                        placeholdersEnabled = false,
+                    ),
+                )
+            assertTrue(page is PagingSource.LoadResult.Page)
+            val urls =
+                page.data.mapNotNull {
+                    (it.status.status.data.content as? UiTimelineV2.Feed)?.url
+                }
+            assertEquals(
+                listOf(
+                    "https://example.com/new",
+                    "https://example.com/old-1",
+                    "https://example.com/old-2",
+                    "https://example.com/old-3",
+                ),
+                urls,
+                "Refresh must preserve a continuous cached history below the fresh page",
+            )
         }
 
     @OptIn(ExperimentalPagingApi::class)
