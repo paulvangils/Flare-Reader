@@ -99,6 +99,7 @@ import dev.dimension.flare.ui.component.Glassify
 import dev.dimension.flare.ui.component.LocalAppSettings
 import dev.dimension.flare.ui.component.LocalBottomBarShowing
 import dev.dimension.flare.ui.component.LocalGlobalAppearance
+import dev.dimension.flare.ui.component.LocalNetworkImageAllowHardware
 import dev.dimension.flare.ui.component.LocalTimelineAppearance
 import dev.dimension.flare.ui.component.RefreshContainer
 import dev.dimension.flare.ui.component.TabIcon
@@ -599,59 +600,63 @@ internal fun TimelineItemContent(
         isRefreshing = state.isRefreshing,
         indicatorPadding = paddingWithStatusBar,
         content = {
-            LazyStatusVerticalStaggeredGrid(
-                state = state.lazyListState,
-                contentPadding = contentPadding,
-                allowGalleryMode = true,
-                modifier =
-                    Modifier
-                        .fillMaxSize(),
+            CompositionLocalProvider(
+                LocalNetworkImageAllowHardware provides false,
             ) {
-                changeLogState?.shouldShowChangeLog?.onSuccess {
-                    changeLogState.changeLog?.let { changelog ->
-                        if (it) {
-                            item {
-                                Column {
-                                    AdaptiveCard {
-                                        Column(
-                                            modifier =
-                                                Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(
-                                                        horizontal = screenHorizontalPadding,
-                                                    ).padding(top = 16.dp, bottom = 8.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                                        ) {
-                                            Text(
-                                                stringResource(R.string.changelog_title),
-                                                style = MaterialTheme.typography.titleMedium,
-                                            )
-                                            Text(
-                                                stringResource(R.string.changelog_message),
-                                                style = MaterialTheme.typography.bodySmall,
-                                            )
-                                            Text(changelog)
-                                            Button(
-                                                onClick = {
-                                                    changeLogState.dismissChangeLog()
-                                                },
+                LazyStatusVerticalStaggeredGrid(
+                    state = state.lazyListState,
+                    contentPadding = contentPadding,
+                    allowGalleryMode = true,
+                    modifier =
+                        Modifier
+                            .fillMaxSize(),
+                ) {
+                    changeLogState?.shouldShowChangeLog?.onSuccess {
+                        changeLogState.changeLog?.let { changelog ->
+                            if (it) {
+                                item {
+                                    Column {
+                                        AdaptiveCard {
+                                            Column(
+                                                modifier =
+                                                    Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(
+                                                            horizontal = screenHorizontalPadding,
+                                                        ).padding(top = 16.dp, bottom = 8.dp),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp),
                                             ) {
                                                 Text(
-                                                    stringResource(android.R.string.ok),
+                                                    stringResource(R.string.changelog_title),
+                                                    style = MaterialTheme.typography.titleMedium,
                                                 )
+                                                Text(
+                                                    stringResource(R.string.changelog_message),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                )
+                                                Text(changelog)
+                                                Button(
+                                                    onClick = {
+                                                        changeLogState.dismissChangeLog()
+                                                    },
+                                                ) {
+                                                    Text(
+                                                        stringResource(android.R.string.ok),
+                                                    )
+                                                }
                                             }
                                         }
-                                    }
-                                    if (!isBigScreen) {
-                                        Spacer(modifier = Modifier.height(12.dp))
+                                        if (!isBigScreen) {
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                status(state.listState)
+                    status(state.listState)
+                }
             }
             state.listState.onSuccess {
                 AnimatedVisibility(
