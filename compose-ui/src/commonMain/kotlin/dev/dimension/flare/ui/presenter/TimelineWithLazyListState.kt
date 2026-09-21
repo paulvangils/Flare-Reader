@@ -419,7 +419,7 @@ internal fun rememberTimelineWithLazyListState(
         }
     }
 
-    suspend fun persistVisibleReadPosition() {
+    suspend fun persistVisibleReadPosition(force: Boolean = false) {
         val persistentTimelineId = timelineId ?: return
         val positionStore = readerPositionStore ?: return
         if (
@@ -431,12 +431,33 @@ internal fun rememberTimelineWithLazyListState(
             return
         }
 
+        val pagingState = currentBaseState.listState
         val visiblePosition =
             captureVisibleTimelinePosition(
                 timelineId = persistentTimelineId,
-                pagingState = currentBaseState.listState,
+                pagingState = pagingState,
                 lazyListState = lazyListState,
             ) ?: return
+
+        if (!force) {
+            val savedPosition = positionStore.getPosition(persistentTimelineId)
+            val success = pagingState as? PagingState.Success
+            if (savedPosition != null && success != null) {
+                val savedIndex = success.indexOfItemKey(savedPosition.itemKey)
+                val visibleIndex = success.indexOfItemKey(visiblePosition.itemKey)
+
+                // Index 0 is newest. Looking back at an older/larger index must never move the
+                // durable read boundary backwards. Only equal/newer visible posts may advance it.
+                if (savedIndex >= 0 && visibleIndex >= 0 && visibleIndex > savedIndex) {
+                    return
+                }
+                // If the saved boundary is temporarily absent from this Paging generation, keep
+                // it rather than replacing it with an unproven transient position.
+                if (savedIndex < 0) {
+                    return
+                }
+            }
+        }
 
         positionStore.savePosition(
             timelineId = visiblePosition.timelineId,
@@ -508,7 +529,7 @@ internal fun rememberTimelineWithLazyListState(
         override fun jumpToLatest() {
             scope.launch {
                 lazyListState.scrollToItem(0)
-                persistVisibleReadPosition()
+                persistVisibleReadPosition(force = true)
             }
         }
     }
