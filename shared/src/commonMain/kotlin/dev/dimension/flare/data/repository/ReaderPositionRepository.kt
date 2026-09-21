@@ -21,11 +21,13 @@ public interface ReaderPositionStore {
 public class ReaderPositionRepository internal constructor(
     private val appDataStore: AppDataStore,
 ) : ReaderPositionStore {
-    override suspend fun getPosition(timelineId: String): ReaderTimelinePosition? =
-        appDataStore.readerPositionStore.data
-            .first()
-            .positions
-            .firstOrNull { it.timelineId == timelineId }
+    override suspend fun getPosition(timelineId: String): ReaderTimelinePosition? {
+        val data = appDataStore.readerPositionStore.data.first()
+        if (data.version != CURRENT_READER_POSITION_VERSION) {
+            return null
+        }
+        return data.positions.firstOrNull { it.timelineId == timelineId }
+    }
 
     override suspend fun savePosition(
         timelineId: String,
@@ -40,6 +42,7 @@ public class ReaderPositionRepository internal constructor(
                     scrollOffset = scrollOffset.coerceAtLeast(0),
                 )
             data.copy(
+                version = CURRENT_READER_POSITION_VERSION,
                 positions =
                     data.positions
                         .filterNot { it.timelineId == timelineId } + updated,
@@ -55,3 +58,6 @@ public class ReaderPositionRepository internal constructor(
         }
     }
 }
+
+
+private const val CURRENT_READER_POSITION_VERSION = 2
