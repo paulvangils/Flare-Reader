@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - reader-v1
+      - reader-v3
 
 permissions:
   contents: read
@@ -21,6 +22,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Show Java runtime
         run: java -version
@@ -33,8 +36,22 @@ jobs:
         with:
           packages: platform-tools
 
-      - name: Run timeline regression tests
-        run: ./gradlew :compose-ui:jvmTest --info --stacktrace
+      - name: Verify Flare data path is untouched
+        run: |
+          git diff --exit-code 8d8c0239041b1c63dc32a5239fb5e913ec73e0fb --             shared/src/commonMain/kotlin/dev/dimension/flare/data/datasource/microblog/paging             shared/src/commonMain/kotlin/dev/dimension/flare/data/database/cache             shared/src/commonMain/kotlin/dev/dimension/flare/data/network             shared/src/commonMain/kotlin/dev/dimension/flare/shared/image             shared/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/home/TimelinePresenter.kt             social
+
+      - name: Prepare stable debug signing
+        run: |
+          base64 -d ci/flare-reader-debug.keystore.b64 > reader-debug.keystore
+          cat > signing.properties <<'EOF'
+          storeFile=reader-debug.keystore
+          storePassword=android
+          keyAlias=flare-reader-debug
+          keyPassword=android
+          EOF
+
+      - name: Run reader regression tests
+        run: ./gradlew :shared:jvmTest :compose-ui:jvmTest --info --stacktrace
 
       - name: Upload test reports on failure
         if: failure()
@@ -49,7 +66,7 @@ jobs:
       - name: Build debug APK
         env:
           BUILD_NUMBER: ${{ github.run_number }}
-          BUILD_VERSION: reader-v1-${{ github.run_number }}
+          BUILD_VERSION: reader-v3-${{ github.run_number }}
         run: ./gradlew :app:assembleDebug --stacktrace
 
       - name: Upload debug APK
