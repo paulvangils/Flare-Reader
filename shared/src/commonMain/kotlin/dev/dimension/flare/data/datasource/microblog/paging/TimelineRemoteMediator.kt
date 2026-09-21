@@ -83,10 +83,14 @@ internal open class TimelineRemoteMediator(
         request: PagingRequest,
     ): PagingResult<DbPagingTimelineWithStatus> {
         val result =
-            timeline(
-                pageSize = pageSize,
-                request = request,
-            )
+            if (request is PagingRequest.Refresh) {
+                loadRefreshUntilCachedOverlap(pageSize)
+            } else {
+                timeline(
+                    pageSize = pageSize,
+                    request = request,
+                )
+            }
         val sortIdProvider = loader as? SortIdProvider
         val sortIds =
             when {
@@ -122,6 +126,61 @@ internal open class TimelineRemoteMediator(
             nextKey = result.nextKey,
             previousKey = result.previousKey,
         )
+    }
+
+    private suspend fun loadRefreshUntilCachedOverlap(
+        pageSize: Int,
+    ): PagingResult<UiTimelineV2> {
+        val cachedStatusIds =
+            database
+                .pagingTimelineDao()
+                .getByPagingKey(pagingKey)
+                .mapTo(mutableSetOf()) { it.statusId }
+
+        var page =
+            timeline(
+                pageSize = pageSize,
+                request = PagingRequest.Refresh,
+            )
+        if (cachedStatusIds.isEmpty()) {
+            return page
+        }
+
+        val combined = ArrayList<UiTimelineV2>()
+        val previousKey = page.previousKey
+        var pagesLoaded = 0
+
+        while (true) {
+            combined += page.data
+            pagesLoaded += 1
+
+            val pageStatusIds =
+                TimelinePagingMapper
+                    .toDb(
+                        data = page.data,
+                        pagingKey = pagingKey,
+                    ).mapTo(mutableSetOf()) { it.timeline.statusId }
+
+            val overlapsCache = pageStatusIds.any { it in cachedStatusIds }
+            val nextKey = page.nextKey
+            if (
+                overlapsCache ||
+                nextKey == null ||
+                pagesLoaded >= MAX_REFRESH_CATCH_UP_PAGES
+            ) {
+                return PagingResult(
+                    data = combined.distinctBy { it.itemKey },
+                    nextKey = nextKey,
+                    previousKey = previousKey,
+                )
+            }
+
+            page =
+                timeline(
+                    pageSize = pageSize,
+                    request = PagingRequest.Append(nextKey),
+                )
+        }
     }
 
     suspend fun timeline(
@@ -309,3 +368,5 @@ private fun List<UiTimelineV2>.collapseReplyChains(): List<UiTimelineV2> {
         item.takeUnless { key in ancestorKeys }
     }
 }
+
+private const val MAX_REFRESH_CATCH_UP_PAGES = 50
