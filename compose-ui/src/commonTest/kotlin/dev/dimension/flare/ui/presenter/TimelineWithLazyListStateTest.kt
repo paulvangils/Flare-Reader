@@ -273,6 +273,64 @@ class TimelineWithLazyListStateTest {
         }
 
     @Test
+    fun pagingUpdateCannotSilentlyOverwritePersistedReadBoundary() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            val pages = MutableStateFlow(page(0..4))
+            val positionStore =
+                FakeReaderPositionStore(
+                    ReaderTimelinePosition(
+                        timelineId = "home",
+                        itemKey = "post-2",
+                        scrollOffset = 11,
+                    ),
+                )
+            val scrollState = LazyStaggeredGridState(initialFirstVisibleItemIndex = 2)
+            val states = mutableListOf<TimelineWithLazyListState>()
+            val job =
+                launch {
+                    moleculeFlow(RecompositionMode.Immediate) {
+                        val pagingState = pages.collectAsLazyPagingItems().toPagingState()
+                        val baseState =
+                            object : TimelineItemPresenter.State {
+                                override val listState = pagingState
+                                override val isRefreshing = pagingState.isRefreshing
+                                override fun refreshSync() = Unit
+                                override suspend fun refreshSuspend() = Unit
+                            }
+                        rememberTimelineWithLazyListState(
+                            baseState = baseState,
+                            lazyListState = scrollState,
+                            timelineId = "home",
+                            readerPositionStore = positionStore,
+                        )
+                    }.collect { states += it }
+                }
+
+            try {
+                advanceUntilIdle()
+                assertEquals("post-2", positionStore.position?.itemKey)
+
+                // Paging prepends data and moves indices internally. Without a real user action,
+                // this must not redefine the persisted read boundary.
+                pages.value = page(-5..4)
+                advanceUntilIdle()
+                assertEquals("post-2", positionStore.position?.itemKey)
+
+                // App background/save uses what is actually visible.
+                scrollState.requestScrollToItem(7, 5)
+                advanceUntilIdle()
+                states.last().saveCurrentReadPosition()
+                advanceUntilIdle()
+                assertEquals("post-2", positionStore.position?.itemKey)
+                assertEquals(5, positionStore.position?.scrollOffset)
+            } finally {
+                job.cancelAndJoin()
+                Dispatchers.resetMain()
+            }
+        }
+
+    @Test
     fun newHeadShowsBannerWithoutReplacingScrollState() =
         withTimelineState { pages, states, scrollState ->
             assertFalse(states.last().showNewToots)
