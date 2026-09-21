@@ -8,6 +8,7 @@ import dev.dimension.flare.data.datastore.model.AppSettings
 import dev.dimension.flare.data.datastore.model.ComposeConfigData
 import dev.dimension.flare.data.datastore.model.FlareConfig
 import dev.dimension.flare.data.datastore.model.PlatformOAuthPendingData
+import dev.dimension.flare.data.datastore.model.ReaderPositionData
 import dev.dimension.flare.data.io.FileStorage
 import org.koin.core.annotation.Single
 
@@ -40,6 +41,13 @@ internal class AppDataStore(
         createDataStore(
             name = "platform_oauth_pending_v2.pb",
             serializer = protobufSerializer(PlatformOAuthPendingData()),
+        )
+    }
+
+    val readerPositionStore: DataStore<ReaderPositionData> by lazy {
+        createDataStore(
+            name = "reader_positions_v3.pb",
+            serializer = protobufSerializer(ReaderPositionData()),
         )
     }
 
