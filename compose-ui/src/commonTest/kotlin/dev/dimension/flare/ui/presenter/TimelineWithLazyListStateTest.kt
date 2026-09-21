@@ -14,6 +14,8 @@ import dev.dimension.flare.common.PagingState
 import dev.dimension.flare.common.isRefreshing
 import dev.dimension.flare.common.refreshSuspend
 import dev.dimension.flare.common.toPagingState
+import dev.dimension.flare.data.datastore.model.ReaderTimelinePosition
+import dev.dimension.flare.data.repository.ReaderPositionStore
 import dev.dimension.flare.model.AccountType
 import dev.dimension.flare.ui.model.UiTimelineV2
 import dev.dimension.flare.ui.render.toUi
@@ -149,6 +151,104 @@ class TimelineWithLazyListStateTest {
                     loadedPages.filter { it.first == refreshGeneration }.map { it.second },
                     "Refresh should keep appending pages until the old anchor key is loaded",
                 )
+            } finally {
+                job.cancelAndJoin()
+                Dispatchers.resetMain()
+            }
+        }
+
+    @Test
+    fun persistedPositionRestoresAfterFreshPresenterAndLoadsOlderPages() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            val loadedStarts = mutableListOf<Int>()
+            val store =
+                FakeReaderPositionStore(
+                    ReaderTimelinePosition(
+                        timelineId = "home",
+                        itemKey = "post-18",
+                        scrollOffset = 23,
+                    ),
+                )
+
+            fun item(index: Int): UiTimelineV2 =
+                UiTimelineV2.Feed(
+                    title = "post-$index",
+                    description = null,
+                    url = "https://example.com/posts/$index",
+                    createdAt = Instant.fromEpochMilliseconds(0).toUi(),
+                    source = UiTimelineV2.Feed.Source(name = "test", icon = null),
+                    accountType = AccountType.Guest,
+                    itemKey = "post-$index",
+                )
+
+            val pager =
+                Pager(
+                    config =
+                        PagingConfig(
+                            pageSize = 5,
+                            initialLoadSize = 5,
+                            prefetchDistance = 1,
+                            enablePlaceholders = false,
+                        ),
+                    pagingSourceFactory = {
+                        object : PagingSource<Int, UiTimelineV2>() {
+                            override fun getRefreshKey(state: androidx.paging.PagingState<Int, UiTimelineV2>): Int? = null
+
+                            override suspend fun load(params: LoadParams<Int>): LoadResult<Int, UiTimelineV2> {
+                                val start = params.key ?: 0
+                                val source = (0..40).toList()
+                                val end = minOf(start + params.loadSize, source.size)
+                                loadedStarts += start
+                                return LoadResult.Page(
+                                    data = source.subList(start, end).map(::item),
+                                    prevKey = null,
+                                    nextKey = end.takeIf { it < source.size },
+                                )
+                            }
+                        }
+                    },
+                )
+
+            val scrollState = LazyStaggeredGridState()
+            val states = mutableListOf<TimelineWithLazyListState>()
+            val job =
+                launch {
+                    moleculeFlow(RecompositionMode.Immediate) {
+                        val pagingState = pager.flow.collectAsLazyPagingItems().toPagingState()
+                        val baseState =
+                            object : TimelineItemPresenter.State {
+                                override val listState = pagingState
+                                override val isRefreshing = pagingState.isRefreshing
+
+                                override fun refreshSync() = Unit
+
+                                override suspend fun refreshSuspend() = Unit
+                            }
+                        rememberTimelineWithLazyListState(
+                            baseState = baseState,
+                            lazyListState = scrollState,
+                            timelineId = "home",
+                            readerPositionStore = store,
+                        )
+                    }.collect { states += it }
+                }
+
+            try {
+                advanceUntilIdle()
+
+                assertEquals(18, scrollState.firstVisibleItemIndex)
+                assertEquals(23, scrollState.firstVisibleItemScrollOffset)
+                assertEquals(18, states.last().newPostsCount)
+                assertTrue(listOf(0, 5, 10, 15).all { it in loadedStarts })
+
+                scrollState.requestScrollToItem(19, 7)
+                advanceUntilIdle()
+                states.last().saveCurrentReadPosition()
+                advanceUntilIdle()
+
+                assertEquals("post-19", store.position?.itemKey)
+                assertEquals(7, store.position?.scrollOffset)
             } finally {
                 job.cancelAndJoin()
                 Dispatchers.resetMain()
@@ -475,6 +575,29 @@ class TimelineWithLazyListStateTest {
         } finally {
             job.cancelAndJoin()
             Dispatchers.resetMain()
+        }
+    }
+
+    private class FakeReaderPositionStore(
+        initialPosition: ReaderTimelinePosition? = null,
+    ) : ReaderPositionStore {
+        var position: ReaderTimelinePosition? = initialPosition
+            private set
+
+        override suspend fun getPosition(timelineId: String): ReaderTimelinePosition? =
+            position?.takeIf { it.timelineId == timelineId }
+
+        override suspend fun savePosition(
+            timelineId: String,
+            itemKey: String,
+            scrollOffset: Int,
+        ) {
+            position =
+                ReaderTimelinePosition(
+                    timelineId = timelineId,
+                    itemKey = itemKey,
+                    scrollOffset = scrollOffset,
+                )
         }
     }
 
