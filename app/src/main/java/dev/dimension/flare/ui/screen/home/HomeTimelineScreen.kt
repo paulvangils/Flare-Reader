@@ -53,6 +53,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -74,6 +75,7 @@ import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import compose.icons.FontAwesomeIcons
@@ -568,6 +570,21 @@ internal fun TimelineItemContent(
         )
     val latestState by rememberUpdatedState(state)
     val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, isCurrentlyVisible, state) {
+        val observer =
+            LifecycleEventObserver { _, event ->
+                if (
+                    isCurrentlyVisible &&
+                    (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP)
+                ) {
+                    state.saveCurrentReadPosition()
+                }
+            }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
     LaunchedEffect(isHomeTimeline, autoRefreshInterval, isCurrentlyVisible, lifecycleOwner) {
         if (!isHomeTimeline || !isCurrentlyVisible || autoRefreshInterval == TimelineAutoRefreshInterval.DISABLED) {
             return@LaunchedEffect
@@ -671,9 +688,7 @@ internal fun TimelineItemContent(
                     Glassify(
                         onClick = {
                             state.onNewTootsShown()
-                            scope.launch {
-                                state.lazyListState.scrollToItem(0)
-                            }
+                            state.jumpToLatest()
                         },
                         shape = RoundedCornerShape(50),
                         color = MaterialTheme.colorScheme.primaryContainer,
