@@ -103,7 +103,11 @@ internal fun rememberTimelineWithLazyListState(
                 if (keys.isNotEmpty()) {
                     // Count the new prefix before the first previously loaded post.
                     // Scroll indices can already have moved by the time this snapshot arrives.
-                    if (previousKeys.isNotEmpty() && (!isAtTheTop || preservingRefreshPosition)) {
+                    if (
+                        previousKeys.isNotEmpty() &&
+                        !restoringReadPosition &&
+                        (!isAtTheTop || preservingRefreshPosition)
+                    ) {
                         newPostCount += keys.takeWhile { it !in previousKeys }.size
                     }
                     previousKeys = keys.toSet()
@@ -119,6 +123,9 @@ internal fun rememberTimelineWithLazyListState(
                         ?.key
             }.drop(1)
                 .collect { (index, key) ->
+                    if (restoringReadPosition) {
+                        return@collect
+                    }
                     // Consume posts on viewport changes, not paging updates whose
                     // new indices may arrive before the grid preserves its position.
                     // A measured item's key also excludes any leading header cards.
@@ -135,8 +142,8 @@ internal fun rememberTimelineWithLazyListState(
                 }
         }
     }
-    LaunchedEffect(isAtTheTop, preservingRefreshPosition) {
-        if (isAtTheTop && !preservingRefreshPosition) {
+    LaunchedEffect(isAtTheTop, preservingRefreshPosition, restoringReadPosition) {
+        if (isAtTheTop && !preservingRefreshPosition && !restoringReadPosition) {
             newPostCount = 0
         }
     }
@@ -349,6 +356,7 @@ internal fun rememberTimelineWithLazyListState(
             val found = findTimelineItemAcrossPages(savedPosition.itemKey)
             if (found != null) {
                 val (pagingState, itemIndex) = found
+                newPostCount = itemIndex.coerceAtLeast(0)
                 restored =
                     applyTimelineAnchor(
                         anchor =
