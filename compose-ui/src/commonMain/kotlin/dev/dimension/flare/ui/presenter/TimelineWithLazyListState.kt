@@ -39,6 +39,10 @@ public interface TimelineWithLazyListState : TimelineItemPresenter.State {
     public val newPostsCount: Int
 
     public fun onNewTootsShown()
+
+    public fun saveCurrentReadPosition()
+
+    public fun jumpToLatest()
 }
 
 /**
@@ -415,6 +419,34 @@ internal fun rememberTimelineWithLazyListState(
         }
     }
 
+    suspend fun persistVisibleReadPosition() {
+        val persistentTimelineId = timelineId ?: return
+        val positionStore = readerPositionStore ?: return
+        if (
+            !initialReadPositionRestored ||
+            !positionPersistenceEnabled ||
+            preservingRefreshPosition ||
+            restoringReadPosition
+        ) {
+            return
+        }
+
+        val visiblePosition =
+            captureVisibleTimelinePosition(
+                timelineId = persistentTimelineId,
+                pagingState = currentBaseState.listState,
+                lazyListState = lazyListState,
+            ) ?: return
+
+        positionStore.savePosition(
+            timelineId = visiblePosition.timelineId,
+            itemKey = visiblePosition.itemKey,
+            scrollOffset = visiblePosition.scrollOffset,
+        )
+    }
+
+    // Persist only positions the user actually navigated to. Paging/database updates are allowed
+    // to move indices internally without silently redefining the user's read boundary.
     LaunchedEffect(
         timelineId,
         readerPositionStore,
@@ -422,66 +454,25 @@ internal fun rememberTimelineWithLazyListState(
         initialReadPositionRestored,
         positionPersistenceEnabled,
     ) {
-        val persistentTimelineId = timelineId ?: return@LaunchedEffect
-        val positionStore = readerPositionStore ?: return@LaunchedEffect
-        if (!initialReadPositionRestored || !positionPersistenceEnabled) {
+        if (
+            timelineId == null ||
+            readerPositionStore == null ||
+            !initialReadPositionRestored ||
+            !positionPersistenceEnabled
+        ) {
             return@LaunchedEffect
         }
 
-        snapshotFlow {
-            if (preservingRefreshPosition || restoringReadPosition) {
-                null
-            } else {
-                captureTimelineScrollAnchor(currentBaseState.listState, lazyListState)
-                    ?.let { anchor ->
-                        ReaderViewportCandidate(
-                            itemKey = anchor.itemKey,
-                            isScrollInProgress = lazyListState.isScrollInProgress,
-                        )
-                    }
-            }
-        }.distinctUntilChanged()
-            .collect { candidate ->
-                if (candidate == null) {
-                    return@collect
+        var userScrollSeen = false
+        snapshotFlow { lazyListState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { scrolling ->
+                if (scrolling) {
+                    userScrollSeen = true
+                } else if (userScrollSeen) {
+                    persistVisibleReadPosition()
+                    userScrollSeen = false
                 }
-
-                val pagingState = currentBaseState.listState as? PagingState.Success ?: return@collect
-                val candidateIndex = pagingState.indexOfItemKey(candidate.itemKey)
-                if (candidateIndex < 0) {
-                    return@collect
-                }
-
-                val boundaryKey = readBoundaryItemKey
-                val boundaryIndex =
-                    boundaryKey
-                        ?.let(pagingState::indexOfItemKey)
-                        ?: -1
-                val advancesBoundary =
-                    when {
-                        boundaryKey == null -> true
-                        candidate.itemKey == boundaryKey -> false
-                        boundaryIndex >= 0 -> candidateIndex < boundaryIndex
-                        else -> candidateIndex == 0 && isAtTheTop
-                    }
-                val refinesCurrentBoundary =
-                    candidate.itemKey == boundaryKey && !candidate.isScrollInProgress
-
-                if (!advancesBoundary && !refinesCurrentBoundary) {
-                    return@collect
-                }
-
-                val anchor =
-                    captureTimelineScrollAnchor(currentBaseState.listState, lazyListState)
-                        ?.takeIf { it.itemKey == candidate.itemKey }
-                        ?: return@collect
-
-                positionStore.savePosition(
-                    timelineId = persistentTimelineId,
-                    itemKey = anchor.itemKey,
-                    scrollOffset = anchor.scrollOffset,
-                )
-                readBoundaryItemKey = anchor.itemKey
             }
     }
 
@@ -506,6 +497,19 @@ internal fun rememberTimelineWithLazyListState(
 
         override fun onNewTootsShown() {
             newPostCount = 0
+        }
+
+        override fun saveCurrentReadPosition() {
+            scope.launch {
+                persistVisibleReadPosition()
+            }
+        }
+
+        override fun jumpToLatest() {
+            scope.launch {
+                lazyListState.scrollToItem(0)
+                persistVisibleReadPosition()
+            }
         }
     }
 }
@@ -561,6 +565,47 @@ private fun captureTimelineScrollAnchor(
         itemKey = fallbackKey,
         pagingIndex = fallbackIndex,
         leadingItemCount = 0,
+        scrollOffset = lazyListState.firstVisibleItemScrollOffset,
+    )
+}
+
+private fun captureVisibleTimelinePosition(
+    timelineId: String,
+    pagingState: PagingState<UiTimelineV2>,
+    lazyListState: LazyStaggeredGridState,
+): ReaderTimelinePosition? {
+    val visibleItems = lazyListState.layoutInfo.visibleItemsInfo.sortedBy { it.index }
+
+    // Prefer the key currently rendered on screen. This remains the user's real visual position
+    // even while Paging is swapping generations and indices behind the grid.
+    for (visibleItem in visibleItems) {
+        val key = visibleItem.key as? String ?: continue
+        val success = pagingState as? PagingState.Success
+        val isKnownTimelineItem =
+            success == null ||
+                success.indexOfItemKey(key) >= 0 ||
+                visibleItem.index == lazyListState.firstVisibleItemIndex
+        if (isKnownTimelineItem) {
+            return ReaderTimelinePosition(
+                timelineId = timelineId,
+                itemKey = key,
+                scrollOffset =
+                    if (visibleItem.index == lazyListState.firstVisibleItemIndex) {
+                        lazyListState.firstVisibleItemScrollOffset
+                    } else {
+                        0
+                    },
+            )
+        }
+    }
+
+    // Before layoutInfo catches up, fall back to the Paging item at the visible index.
+    val success = pagingState as? PagingState.Success ?: return null
+    val index = lazyListState.firstVisibleItemIndex
+    val key = success.peek(index)?.itemKey ?: return null
+    return ReaderTimelinePosition(
+        timelineId = timelineId,
+        itemKey = key,
         scrollOffset = lazyListState.firstVisibleItemScrollOffset,
     )
 }
