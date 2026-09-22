@@ -83,22 +83,96 @@ internal open class TimelineRemoteMediator(
         request: PagingRequest,
     ): PagingResult<DbPagingTimelineWithStatus> {
         val result =
-            timeline(
-                pageSize = pageSize,
-                request = request,
-            )
+            if (request is PagingRequest.Refresh) {
+                loadRefreshUntilCachedOverlap(pageSize)
+            } else {
+                timeline(
+                    pageSize = pageSize,
+                    request = request,
+                )
+            }
         val sortIdProvider = loader as? SortIdProvider
+        val sortIds =
+            when {
+                sortIdProvider != null -> result.data.map { sortIdProvider.sortId(it) }
+                request is PagingRequest.Refresh -> {
+                    val minimumSortId = database.pagingTimelineDao().getMinSortId(pagingKey)
+                    if (minimumSortId != null && minimumSortId >= Long.MIN_VALUE + result.data.size) {
+                        val firstSortId = minimumSortId - result.data.size
+                        result.data.indices.map { index -> firstSortId + index }
+                    } else {
+                        emptyList()
+                    }
+                }
+                else -> emptyList()
+            }
         val data =
             TimelinePagingMapper.toDb(
                 data = result.data,
                 pagingKey = pagingKey,
-                sortIds = result.data.map { sortIdProvider?.sortId(it) },
+                sortIds = sortIds,
             )
         return PagingResult(
             data = data,
             nextKey = result.nextKey,
             previousKey = result.previousKey,
         )
+    }
+
+    private suspend fun loadRefreshUntilCachedOverlap(
+        pageSize: Int,
+    ): PagingResult<UiTimelineV2> {
+        val cachedStatusIds =
+            database
+                .pagingTimelineDao()
+                .getByPagingKey(pagingKey)
+                .mapTo(mutableSetOf()) { it.statusId }
+
+        var page =
+            timeline(
+                pageSize = pageSize,
+                request = PagingRequest.Refresh,
+            )
+        if (cachedStatusIds.isEmpty()) {
+            return page
+        }
+
+        val combined = ArrayList<UiTimelineV2>()
+        val previousKey = page.previousKey
+        var pagesLoaded = 0
+
+        while (true) {
+            combined += page.data
+            pagesLoaded += 1
+
+            val pageStatusIds =
+                TimelinePagingMapper
+                    .toDb(
+                        data = page.data,
+                        pagingKey = pagingKey,
+                    ).mapTo(mutableSetOf()) { it.timeline.statusId }
+
+            val overlapsCache = pageStatusIds.any { it in cachedStatusIds }
+            val nextKey = page.nextKey
+
+            if (
+                overlapsCache ||
+                nextKey == null ||
+                pagesLoaded >= MAX_REFRESH_CATCH_UP_PAGES
+            ) {
+                return PagingResult(
+                    data = combined.distinctBy { it.itemKey },
+                    nextKey = nextKey,
+                    previousKey = previousKey,
+                )
+            }
+
+            page =
+                timeline(
+                    pageSize = pageSize,
+                    request = PagingRequest.Append(nextKey),
+                )
+        }
     }
 
     suspend fun timeline(
@@ -147,33 +221,9 @@ internal open class TimelineRemoteMediator(
             } else {
                 data
             }
-        val staleTimeline =
-            if (request is PagingRequest.Refresh) {
-                val retainedStatusIds =
-                    dataToSave
-                        .groupBy { it.timeline.pagingKey }
-                        .mapValues { (_, rows) -> rows.mapTo(mutableSetOf()) { it.timeline.statusId } }
-                (retainedStatusIds.keys + loader.pagingKey).flatMap { key ->
-                    database
-                        .pagingTimelineDao()
-                        .getByPagingKey(key)
-                        .filter { it.statusId !in retainedStatusIds[key].orEmpty() }
-                }
-            } else {
-                emptyList()
-            }
+        // Reader refreshes are continuity-preserving: update/insert the fetched range, but
+        // never delete older cached rows merely because they were outside the newest page(s).
         saveToDatabase(database, dataToSave)
-        staleTimeline.groupBy { it.pagingKey }.forEach { (pagingKey, rows) ->
-            database
-                .pagingTimelineDao()
-                .deletePresentationReferences(
-                    pagingKey = pagingKey,
-                    statusIds = rows.map { it.statusId },
-                )
-        }
-        if (staleTimeline.isNotEmpty()) {
-            database.pagingTimelineDao().delete(staleTimeline)
-        }
         enqueuePreTranslation(dataToSave)
     }
 
@@ -308,3 +358,6 @@ private fun List<UiTimelineV2>.collapseReplyChains(): List<UiTimelineV2> {
         item.takeUnless { key in ancestorKeys }
     }
 }
+
+
+private const val MAX_REFRESH_CATCH_UP_PAGES = 50
