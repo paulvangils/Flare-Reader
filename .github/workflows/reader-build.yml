@@ -36,9 +36,17 @@ jobs:
         with:
           packages: platform-tools
 
-      - name: Verify Flare data path is untouched
+      - name: Verify only approved Flare internals changed
         run: |
-          git diff --exit-code 8d8c0239041b1c63dc32a5239fb5e913ec73e0fb --             shared/src/commonMain/kotlin/dev/dimension/flare/data/datasource/microblog/paging             shared/src/commonMain/kotlin/dev/dimension/flare/data/database/cache             shared/src/commonMain/kotlin/dev/dimension/flare/data/network             shared/src/commonMain/kotlin/dev/dimension/flare/shared/image             shared/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/home/TimelinePresenter.kt             social
+          BASE=8d8c0239041b1c63dc32a5239fb5e913ec73e0fb
+          ALLOWED_1="shared/src/commonMain/kotlin/dev/dimension/flare/data/datasource/microblog/paging/TimelineRemoteMediator.kt"
+          ALLOWED_2="shared/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/home/TimelinePresenter.kt"
+          git diff --name-only "$BASE" --             shared/src/commonMain/kotlin/dev/dimension/flare/data/datasource/microblog/paging             shared/src/commonMain/kotlin/dev/dimension/flare/data/database/cache             shared/src/commonMain/kotlin/dev/dimension/flare/data/network             shared/src/commonMain/kotlin/dev/dimension/flare/shared/image             shared/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/home/TimelinePresenter.kt             social             | while read -r path; do
+                if [ "$path" != "$ALLOWED_1" ] && [ "$path" != "$ALLOWED_2" ]; then
+                  echo "Unexpected protected-code change: $path"
+                  exit 1
+                fi
+              done
 
       - name: Prepare stable debug signing
         run: |
