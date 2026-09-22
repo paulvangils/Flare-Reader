@@ -288,7 +288,14 @@ public open class TimelinePresenter : PresenterBase<TimelineState> {
 internal suspend fun shouldRefreshTimelineOnInitialize(
     isHomeTimeline: Boolean,
     refreshHomeTimelineOnLaunch: suspend () -> Boolean,
-): Boolean = !isHomeTimeline || refreshHomeTimelineOnLaunch()
+): Boolean {
+    // Reader must never mutate the home timeline before its persisted visual anchor is restored.
+    // Manual refresh remains available and is protected by TimelineWithLazyListState.
+    if (isHomeTimeline) {
+        return false
+    }
+    return refreshHomeTimelineOnLaunch()
+}
 
 @Immutable
 public interface TimelineState {
