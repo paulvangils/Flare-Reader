@@ -6,6 +6,7 @@ on:
     branches:
       - reader-v1
       - reader-v3
+      - reader-v3.1
 
 permissions:
   contents: read
@@ -36,9 +37,31 @@ jobs:
         with:
           packages: platform-tools
 
-      - name: Verify Flare data path is untouched
+      - name: Verify Reader change isolation
         run: |
-          git diff --exit-code 8d8c0239041b1c63dc32a5239fb5e913ec73e0fb --             shared/src/commonMain/kotlin/dev/dimension/flare/data/datasource/microblog/paging             shared/src/commonMain/kotlin/dev/dimension/flare/data/database/cache             shared/src/commonMain/kotlin/dev/dimension/flare/data/network             shared/src/commonMain/kotlin/dev/dimension/flare/shared/image             shared/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/home/TimelinePresenter.kt             social
+          cat > /tmp/reader-allowed-files.txt <<'EOF'
+          .github/workflows/reader-build.yml
+          app/src/main/java/dev/dimension/flare/ui/screen/home/HomeTimelineScreen.kt
+          ci/flare-reader-debug.keystore.b64
+          compose-ui/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/TimelineWithLazyListState.kt
+          compose-ui/src/commonTest/kotlin/dev/dimension/flare/ui/presenter/TimelineWithLazyListStateTest.kt
+          shared/src/commonMain/kotlin/dev/dimension/flare/data/datastore/AppDataStore.kt
+          shared/src/commonMain/kotlin/dev/dimension/flare/data/datastore/model/ReaderPositionData.kt
+          shared/src/commonMain/kotlin/dev/dimension/flare/data/datasource/microblog/paging/TimelineRemoteMediator.kt
+          shared/src/commonMain/kotlin/dev/dimension/flare/data/repository/ReaderPositionRepository.kt
+          shared/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/home/TimelinePresenter.kt
+          shared/src/commonTest/kotlin/dev/dimension/flare/data/datasource/microblog/MixedRemoteMediatorTest.kt
+          shared/src/commonTest/kotlin/dev/dimension/flare/data/repository/ReaderPositionRepositoryTest.kt
+          shared/src/commonTest/kotlin/dev/dimension/flare/ui/presenter/home/TimelinePresenterBindingTest.kt
+          EOF
+          git diff --name-only 8d8c0239041b1c63dc32a5239fb5e913ec73e0fb...HEAD > /tmp/reader-changed-files.txt
+          unexpected="$(grep -vxFf /tmp/reader-allowed-files.txt /tmp/reader-changed-files.txt || true)"
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected files changed:"
+            echo "$unexpected"
+            exit 1
+          fi
+          git diff --exit-code 8d8c0239041b1c63dc32a5239fb5e913ec73e0fb...HEAD --             shared/src/commonMain/kotlin/dev/dimension/flare/data/database/cache             shared/src/commonMain/kotlin/dev/dimension/flare/data/network             shared/src/commonMain/kotlin/dev/dimension/flare/shared/image             social
 
       - name: Prepare stable debug signing
         run: |
@@ -66,7 +89,7 @@ jobs:
       - name: Build debug APK
         env:
           BUILD_NUMBER: ${{ github.run_number }}
-          BUILD_VERSION: reader-v3-${{ github.run_number }}
+          BUILD_VERSION: reader-v3.1-${{ github.run_number }}
         run: ./gradlew :app:assembleDebug --stacktrace
 
       - name: Upload debug APK
