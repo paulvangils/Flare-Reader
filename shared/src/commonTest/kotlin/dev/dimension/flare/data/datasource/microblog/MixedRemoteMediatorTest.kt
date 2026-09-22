@@ -894,7 +894,7 @@ class MixedRemoteMediatorTest : RobolectricTest() {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
-    fun refreshWithStableSortIdUpdatesCachedRowAndDeletesStaleRows() =
+    fun refreshWithStableSortIdUpdatesCachedRowAndRetainsHistory() =
         runTest {
             var remoteItems =
                 listOf(
@@ -949,14 +949,10 @@ class MixedRemoteMediatorTest : RobolectricTest() {
                     .contentRevision
             assertTrue(revisionAfter > revisionBefore)
             assertEquals(2, initial.size)
-            assertEquals(1, refreshed.size)
+            assertEquals(2, refreshed.size)
             assertEquals(
-                "updated",
-                (
-                    refreshed
-                        .single()
-                        .baseItem as UiTimelineV2.Feed
-                ).title,
+                listOf("updated", "stale"),
+                refreshed.map { (it.baseItem as UiTimelineV2.Feed).title },
             )
         }
 
