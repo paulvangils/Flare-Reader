@@ -8,9 +8,11 @@ import dev.dimension.flare.common.SnowflakeIdGenerator
 import dev.dimension.flare.data.database.cache.CacheDatabase
 import dev.dimension.flare.data.database.cache.mapper.saveToDatabase
 import dev.dimension.flare.data.database.cache.model.DbPagingTimelineWithStatus
+import dev.dimension.flare.data.database.cache.model.DbStatus
 import dev.dimension.flare.data.translation.NoopPreTranslationService
 import dev.dimension.flare.data.translation.PreTranslationService
 import dev.dimension.flare.model.AccountType
+import dev.dimension.flare.model.DbAccountType
 import dev.dimension.flare.model.MicroBlogKey
 import dev.dimension.flare.model.ReferenceType
 import dev.dimension.flare.ui.model.UiTimelineV2
@@ -82,6 +84,15 @@ internal open class TimelineRemoteMediator(
         pageSize: Int,
         request: PagingRequest,
     ): PagingResult<DbPagingTimelineWithStatus> {
+        val cachedSortIdsByStatusId =
+            if (request is PagingRequest.Refresh) {
+                database
+                    .pagingTimelineDao()
+                    .getByPagingKey(pagingKey)
+                    .associate { it.statusId to it.sortId }
+            } else {
+                emptyMap()
+            }
         val result =
             if (request is PagingRequest.Refresh) {
                 loadRefreshUntilCachedOverlap(pageSize)
@@ -99,13 +110,11 @@ internal open class TimelineRemoteMediator(
         val sortIds =
             when {
                 request is PagingRequest.Refresh && providedSortIds?.all { it == null } != false -> {
-                    val minimumSortId = database.pagingTimelineDao().getMinSortId(pagingKey)
-                    if (minimumSortId != null && minimumSortId >= Long.MIN_VALUE + result.data.size) {
-                        val firstSortId = minimumSortId - result.data.size
-                        result.data.indices.map { index -> firstSortId + index }
-                    } else {
-                        emptyList()
-                    }
+                    refreshSortIds(
+                        data = result.data,
+                        cachedSortIdsByStatusId = cachedSortIdsByStatusId,
+                        sortChronologically = sortIdProvider != null,
+                    )
                 }
                 providedSortIds != null -> providedSortIds
                 else -> emptyList()
@@ -156,11 +165,16 @@ internal open class TimelineRemoteMediator(
                         pagingKey = pagingKey,
                     ).mapTo(mutableSetOf()) { it.timeline.statusId }
 
-            val overlapsCache = pageStatusIds.any { it in cachedStatusIds }
+            // A mixed timeline can contain one old cached post from a quiet account
+            // while other accounts still have unread posts on later pages. A single overlap is
+            // therefore not a safe continuity boundary. Only stop once the whole fetched page is
+            // already known, which means every still-active source has reached retained history.
+            val reachedCachedBoundary =
+                pageStatusIds.isNotEmpty() && pageStatusIds.all { it in cachedStatusIds }
             val nextKey = page.nextKey
 
             if (
-                overlapsCache ||
+                reachedCachedBoundary ||
                 nextKey == null ||
                 pagesLoaded >= MAX_REFRESH_CATCH_UP_PAGES
             ) {
@@ -176,6 +190,60 @@ internal open class TimelineRemoteMediator(
                     pageSize = pageSize,
                     request = PagingRequest.Append(nextKey),
                 )
+        }
+    }
+
+    private fun refreshSortIds(
+        data: List<UiTimelineV2>,
+        cachedSortIdsByStatusId: Map<String, Long>,
+        sortChronologically: Boolean,
+    ): List<Long?> {
+        if (cachedSortIdsByStatusId.isEmpty() || data.isEmpty()) {
+            return emptyList()
+        }
+
+        val statusIds =
+            data.map {
+                DbStatus.createId(
+                    accountType = it.accountType as DbAccountType,
+                    statusKey = it.statusKey,
+                )
+            }
+        val newIndices =
+            statusIds.indices.filter { index ->
+                statusIds[index] !in cachedSortIdsByStatusId
+            }
+        if (newIndices.isEmpty()) {
+            return statusIds.map { cachedSortIdsByStatusId[it] }
+        }
+
+        val minimumSortId = cachedSortIdsByStatusId.values.minOrNull() ?: return emptyList()
+        if (minimumSortId < Long.MIN_VALUE + newIndices.size) {
+            return emptyList()
+        }
+
+        // Mixed TimePerPage refreshes are ordered per remote page. Across several catch-up
+        // pages, a quiet account's older post can otherwise appear before newer posts from a
+        // busier account. Order only the genuinely new prefix chronologically; cached rows keep
+        // their original sortId so an old overlap can never jump ahead of the saved read anchor.
+        val orderedNewIndices =
+            if (sortChronologically) {
+                newIndices.sortedWith(
+                    compareByDescending<Int> {
+                        data[it].createdAt.value.toEpochMilliseconds()
+                    }.thenBy { it },
+                )
+            } else {
+                newIndices
+            }
+        val firstSortId = minimumSortId - newIndices.size
+        val assigned = HashMap<Int, Long>(newIndices.size)
+        orderedNewIndices.forEachIndexed { order, index ->
+            assigned[index] = firstSortId + order
+        }
+
+        return statusIds.mapIndexed { index, statusId ->
+            cachedSortIdsByStatusId[statusId] ?: assigned[index]
         }
     }
 
