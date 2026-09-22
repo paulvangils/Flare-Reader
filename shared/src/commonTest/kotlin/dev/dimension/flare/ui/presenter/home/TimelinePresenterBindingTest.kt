@@ -122,29 +122,32 @@ class TimelinePresenterBindingTest {
         }
 
     @Test
-    fun launchRefreshSettingOnlyAppliesToHomeTimeline() =
+    fun readerNeverRefreshesHomeTimelineBeforeVisualAnchorRestores() =
         runTest {
             var settingReads = 0
-            val disabledSetting =
+            val enabledSetting =
                 suspend {
                     settingReads += 1
-                    false
+                    true
                 }
 
             assertTrue(
                 shouldRefreshTimelineOnInitialize(
                     isHomeTimeline = false,
-                    refreshHomeTimelineOnLaunch = disabledSetting,
+                    refreshHomeTimelineOnLaunch = enabledSetting,
                 ),
             )
-            assertEquals(0, settingReads)
             assertFalse(
                 shouldRefreshTimelineOnInitialize(
                     isHomeTimeline = true,
-                    refreshHomeTimelineOnLaunch = disabledSetting,
+                    refreshHomeTimelineOnLaunch = enabledSetting,
                 ),
             )
-            assertEquals(1, settingReads)
+            assertEquals(
+                0,
+                settingReads,
+                "Reader launch behavior must not depend on the upstream launch-refresh setting",
+            )
         }
 
     @Test
