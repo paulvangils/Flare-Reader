@@ -141,8 +141,21 @@ internal open class TimelineRemoteMediator(
             val overlapsCache = pageStatusIds.any { it in cachedStatusIds }
             val nextKey = page.nextKey
             if (overlapsCache || nextKey == null) {
+                val deduplicated = ArrayList<UiTimelineV2>(combined.size)
+                val seenStatusIds = mutableSetOf<String>()
+                combined.forEach { item ->
+                    val statusId =
+                        TimelinePagingMapper
+                            .toDb(
+                                data = item,
+                                pagingKey = pagingKey,
+                            ).timeline.statusId
+                    if (seenStatusIds.add(statusId)) {
+                        deduplicated += item
+                    }
+                }
                 return PagingResult(
-                    data = combined.distinctBy { it.itemKey },
+                    data = deduplicated,
                     nextKey = nextKey,
                     previousKey = previousKey,
                 )
