@@ -294,7 +294,7 @@ internal suspend fun shouldRefreshTimelineOnInitialize(
     if (isHomeTimeline) {
         return false
     }
-    return refreshHomeTimelineOnLaunch()
+    return true
 }
 
 @Immutable
