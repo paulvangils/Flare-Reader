@@ -161,7 +161,7 @@ internal open class TimelineRemoteMediator(
                 pagesLoaded >= MAX_REFRESH_CATCH_UP_PAGES
             ) {
                 return PagingResult(
-                    data = combined.distinctBy { it.itemKey },
+                    data = combined.distinctBy { it.accountType to it.statusKey },
                     nextKey = nextKey,
                     previousKey = previousKey,
                 )
