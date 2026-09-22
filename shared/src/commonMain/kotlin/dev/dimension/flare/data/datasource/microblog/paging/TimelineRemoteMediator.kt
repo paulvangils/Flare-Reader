@@ -83,10 +83,14 @@ internal open class TimelineRemoteMediator(
         request: PagingRequest,
     ): PagingResult<DbPagingTimelineWithStatus> {
         val result =
-            timeline(
-                pageSize = pageSize,
-                request = request,
-            )
+            if (request is PagingRequest.Refresh) {
+                loadRefreshUntilCachedOverlap(pageSize)
+            } else {
+                timeline(
+                    pageSize = pageSize,
+                    request = request,
+                )
+            }
         val sortIdProvider = loader as? SortIdProvider
         val data =
             TimelinePagingMapper.toDb(
@@ -99,6 +103,61 @@ internal open class TimelineRemoteMediator(
             nextKey = result.nextKey,
             previousKey = result.previousKey,
         )
+    }
+
+    private suspend fun loadRefreshUntilCachedOverlap(
+        pageSize: Int,
+    ): PagingResult<UiTimelineV2> {
+        val cachedStatusIds =
+            database
+                .pagingTimelineDao()
+                .getByPagingKey(pagingKey)
+                .mapTo(mutableSetOf()) { it.statusId }
+
+        var page =
+            timeline(
+                pageSize = pageSize,
+                request = PagingRequest.Refresh,
+            )
+        if (cachedStatusIds.isEmpty() || page.data.isEmpty()) {
+            return page
+        }
+
+        val combined = ArrayList<UiTimelineV2>()
+        val previousKey = page.previousKey
+        var pagesLoaded = 0
+
+        while (true) {
+            combined += page.data
+            pagesLoaded += 1
+
+            val pageStatusIds =
+                TimelinePagingMapper
+                    .toDb(
+                        data = page.data,
+                        pagingKey = pagingKey,
+                    ).mapTo(mutableSetOf()) { it.timeline.statusId }
+
+            val overlapsCache = pageStatusIds.any { it in cachedStatusIds }
+            val nextKey = page.nextKey
+            if (overlapsCache || nextKey == null) {
+                return PagingResult(
+                    data = combined.distinctBy { it.itemKey },
+                    nextKey = nextKey,
+                    previousKey = previousKey,
+                )
+            }
+
+            if (pagesLoaded >= MAX_REFRESH_BRIDGE_PAGES) {
+                error("Reader refresh could not bridge to cached timeline within $MAX_REFRESH_BRIDGE_PAGES pages")
+            }
+
+            page =
+                timeline(
+                    pageSize = pageSize,
+                    request = PagingRequest.Append(nextKey),
+                )
+        }
     }
 
     suspend fun timeline(
@@ -147,34 +206,34 @@ internal open class TimelineRemoteMediator(
             } else {
                 data
             }
-        val staleTimeline =
-            if (request is PagingRequest.Refresh) {
-                val retainedStatusIds =
+        val rowsToSave =
+            if (request is PagingRequest.Refresh && dataToSave.isNotEmpty()) {
+                val existingRows = database.pagingTimelineDao().getByPagingKey(loader.pagingKey)
+                if (existingRows.isEmpty()) {
                     dataToSave
-                        .groupBy { it.timeline.pagingKey }
-                        .mapValues { (_, rows) -> rows.mapTo(mutableSetOf()) { it.timeline.statusId } }
-                (retainedStatusIds.keys + loader.pagingKey).flatMap { key ->
-                    database
-                        .pagingTimelineDao()
-                        .getByPagingKey(key)
-                        .filter { it.statusId !in retainedStatusIds[key].orEmpty() }
+                } else {
+                    val existingByStatusId = existingRows.associateBy { it.statusId }
+                    val newCount = dataToSave.count { it.timeline.statusId !in existingByStatusId }
+                    val minimumSortId = existingRows.minOf { it.sortId }
+                    if (minimumSortId < Long.MIN_VALUE + newCount) {
+                        error("Reader timeline sort space exhausted")
+                    }
+                    var nextNewSortId = minimumSortId - newCount
+                    dataToSave.map { item ->
+                        val existing = existingByStatusId[item.timeline.statusId]
+                        if (existing != null) {
+                            item.copy(timeline = item.timeline.copy(sortId = existing.sortId))
+                        } else {
+                            item.copy(timeline = item.timeline.copy(sortId = nextNewSortId++))
+                        }
+                    }
                 }
             } else {
-                emptyList()
+                dataToSave
             }
-        saveToDatabase(database, dataToSave)
-        staleTimeline.groupBy { it.pagingKey }.forEach { (pagingKey, rows) ->
-            database
-                .pagingTimelineDao()
-                .deletePresentationReferences(
-                    pagingKey = pagingKey,
-                    statusIds = rows.map { it.statusId },
-                )
-        }
-        if (staleTimeline.isNotEmpty()) {
-            database.pagingTimelineDao().delete(staleTimeline)
-        }
-        enqueuePreTranslation(dataToSave)
+
+        saveToDatabase(database, rowsToSave)
+        enqueuePreTranslation(rowsToSave)
     }
 
     protected fun enqueuePreTranslation(dataToSave: List<DbPagingTimelineWithStatus>) {
@@ -308,3 +367,6 @@ private fun List<UiTimelineV2>.collapseReplyChains(): List<UiTimelineV2> {
         item.takeUnless { key in ancestorKeys }
     }
 }
+
+
+private const val MAX_REFRESH_BRIDGE_PAGES = 100
