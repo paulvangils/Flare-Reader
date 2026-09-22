@@ -288,7 +288,12 @@ public open class TimelinePresenter : PresenterBase<TimelineState> {
 internal suspend fun shouldRefreshTimelineOnInitialize(
     isHomeTimeline: Boolean,
     refreshHomeTimelineOnLaunch: suspend () -> Boolean,
-): Boolean = !isHomeTimeline || refreshHomeTimelineOnLaunch()
+): Boolean {
+    if (isHomeTimeline) {
+        return false
+    }
+    return true
+}
 
 @Immutable
 public interface TimelineState {
