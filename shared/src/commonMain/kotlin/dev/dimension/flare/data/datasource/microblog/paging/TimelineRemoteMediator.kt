@@ -84,7 +84,7 @@ internal open class TimelineRemoteMediator(
         pageSize: Int,
         request: PagingRequest,
     ): PagingResult<DbPagingTimelineWithStatus> {
-        val cachedSortIdsByStatusId =
+        var cachedSortIdsByStatusId =
             if (request is PagingRequest.Refresh) {
                 database
                     .pagingTimelineDao()
@@ -107,6 +107,18 @@ internal open class TimelineRemoteMediator(
             sortIdProvider?.let { provider ->
                 result.data.map { provider.sortId(it) }
             }
+        if (
+            request is PagingRequest.Refresh &&
+            providedSortIds?.all { it == null } == true &&
+            cachedSortIdsByStatusId.isNotEmpty() &&
+            repairChronologicalCacheIfNeeded()
+        ) {
+            cachedSortIdsByStatusId =
+                database
+                    .pagingTimelineDao()
+                    .getByPagingKey(pagingKey)
+                    .associate { it.statusId to it.sortId }
+        }
         val sortIds =
             when {
                 request is PagingRequest.Refresh && providedSortIds?.all { it == null } != false -> {
@@ -191,6 +203,41 @@ internal open class TimelineRemoteMediator(
                     request = PagingRequest.Append(nextKey),
                 )
         }
+    }
+
+    private suspend fun repairChronologicalCacheIfNeeded(): Boolean {
+        val roots =
+            database
+                .pagingTimelineDao()
+                .getTimelineRootRows(
+                    pagingKey = pagingKey,
+                    offset = 0,
+                    limit = Int.MAX_VALUE,
+                )
+        if (roots.size < 2) {
+            return false
+        }
+
+        fun timestamp(index: Int): Long =
+            roots[index].status.content.createdAt.value.toEpochMilliseconds()
+
+        val needsRepair =
+            (1 until roots.size).any { index ->
+                timestamp(index - 1) < timestamp(index)
+            }
+        if (!needsRepair) {
+            return false
+        }
+
+        val repaired =
+            roots
+                .sortedByDescending {
+                    it.status.content.createdAt.value.toEpochMilliseconds()
+                }.mapIndexed { index, row ->
+                    row.timeline.copy(sortId = index.toLong())
+                }
+        database.pagingTimelineDao().updateExisting(repaired)
+        return true
     }
 
     private fun refreshSortIds(
