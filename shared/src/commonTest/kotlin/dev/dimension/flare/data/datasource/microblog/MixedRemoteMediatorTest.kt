@@ -473,6 +473,127 @@ class MixedRemoteMediatorTest : RobolectricTest() {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
+    fun readerRefreshDoesNotTreatOneQuietAccountOverlapAsContinuityBoundary() =
+        runTest {
+            val cachedAnchor = feed("https://example.com/cached-anchor", 3000L)
+            val cachedOlder = feed("https://example.com/cached-older", 1000L)
+
+            val active =
+                FakeLoader("active") { request ->
+                    when (request) {
+                        PagingRequest.Refresh ->
+                            PagingResult(
+                                data =
+                                    listOf(
+                                        feed("https://example.com/active-7000", 7000L),
+                                        feed("https://example.com/active-6500", 6500L),
+                                    ),
+                                nextKey = "active-page-2",
+                            )
+
+                        is PagingRequest.Append ->
+                            when (request.nextKey) {
+                                "active-page-2" ->
+                                    PagingResult(
+                                        data =
+                                            listOf(
+                                                feed("https://example.com/active-6000", 6000L),
+                                                feed("https://example.com/active-5500", 5500L),
+                                            ),
+                                        nextKey = "active-page-3",
+                                    )
+
+                                "active-page-3" ->
+                                    PagingResult(
+                                        data = listOf(cachedAnchor, cachedOlder),
+                                        nextKey = "active-older",
+                                    )
+
+                                else -> error("Unexpected active append key: ${request.nextKey}")
+                            }
+
+                        is PagingRequest.Prepend -> error("No prepend expected")
+                    }
+                }
+            val quiet =
+                FakeLoader("quiet") { request ->
+                    when (request) {
+                        PagingRequest.Refresh ->
+                            PagingResult(
+                                data =
+                                    listOf(
+                                        feed("https://example.com/quiet-4000", 4000L),
+                                        cachedOlder,
+                                    ),
+                                nextKey = null,
+                            )
+
+                        is PagingRequest.Append -> error("Quiet source is exhausted after refresh")
+                        is PagingRequest.Prepend -> error("No prepend expected")
+                    }
+                }
+            val mixed = MixedRemoteMediator(db, listOf(active, quiet))
+            saveToDatabase(
+                db,
+                TimelinePagingMapper.toDb(
+                    data = listOf(cachedAnchor, cachedOlder),
+                    pagingKey = mixed.pagingKey,
+                ),
+            )
+            val mediator = TimelineRemoteMediator(loader = mixed, database = db, allowLongText = false)
+
+            val mediatorResult =
+                mediator.load(
+                    loadType = LoadType.REFRESH,
+                    state =
+                        PagingState(
+                            pages = emptyList(),
+                            anchorPosition = null,
+                            config = PagingConfig(pageSize = 2),
+                            leadingPlaceholderCount = 0,
+                        ),
+                )
+
+            assertTrue(mediatorResult is androidx.paging.RemoteMediator.MediatorResult.Success)
+            assertEquals(
+                listOf(
+                    PagingRequest.Refresh,
+                    PagingRequest.Append("active-page-2"),
+                    PagingRequest.Append("active-page-3"),
+                ),
+                active.requests,
+                "One cached post from a quiet account must not stop catch-up for an active account",
+            )
+            assertEquals(listOf(PagingRequest.Refresh), quiet.requests)
+
+            val urls =
+                db
+                    .pagingTimelineDao()
+                    .getTimelinePage(
+                        pagingKey = mixed.pagingKey,
+                        offset = 0,
+                        limit = 20,
+                    ).mapNotNull {
+                        (it.status.status.data.content as? UiTimelineV2.Feed)?.url
+                    }
+
+            assertEquals(
+                listOf(
+                    "https://example.com/active-7000",
+                    "https://example.com/active-6500",
+                    "https://example.com/active-6000",
+                    "https://example.com/active-5500",
+                    "https://example.com/quiet-4000",
+                    "https://example.com/cached-anchor",
+                    "https://example.com/cached-older",
+                ),
+                urls,
+                "Catch-up pages must form one chronological new prefix and must not move an old cached overlap ahead of the read anchor",
+            )
+        }
+
+    @OptIn(ExperimentalPagingApi::class)
+    @Test
     fun readerRefreshKeepsOneHundredCachedPostsAndLastReadAnchorAcrossThirtyNewPosts() =
         runTest {
             val cached =
