@@ -330,7 +330,7 @@ class MixedRemoteMediatorTest : RobolectricTest() {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
-    fun timelineRefreshClearsExistingCacheWhenRemoteReturnsEmpty() =
+    fun timelineRefreshRetainsExistingCacheWhenRemoteReturnsEmpty() =
         runTest {
             val cached = feed("https://example.com/cached", 1000L)
             val loader =
@@ -359,7 +359,116 @@ class MixedRemoteMediatorTest : RobolectricTest() {
                 )
 
             assertTrue(mediatorResult is androidx.paging.RemoteMediator.MediatorResult.Success)
-            assertTrue(db.pagingTimelineDao().getByPagingKey(loader.pagingKey).isEmpty())
+            assertEquals(1, db.pagingTimelineDao().getByPagingKey(loader.pagingKey).size)
+        }
+
+    @OptIn(ExperimentalPagingApi::class)
+    @Test
+    fun readerRefreshLoadsUntilCachedOverlapAndKeepsContinuousOrder() =
+        runTest {
+            val cached =
+                listOf(
+                    feed("https://example.com/cached-1", 3000L),
+                    feed("https://example.com/cached-2", 2000L),
+                    feed("https://example.com/cached-3", 1000L),
+                )
+            val loader =
+                FakeLoader("reader_continuity") { request ->
+                    when (request) {
+                        PagingRequest.Refresh ->
+                            PagingResult(
+                                data =
+                                    listOf(
+                                        feed("https://example.com/new-1", 7000L),
+                                        feed("https://example.com/new-2", 6000L),
+                                    ),
+                                nextKey = "page-2",
+                            )
+
+                        is PagingRequest.Append ->
+                            when (request.nextKey) {
+                                "page-2" ->
+                                    PagingResult(
+                                        data =
+                                            listOf(
+                                                feed("https://example.com/new-3", 5000L),
+                                                feed("https://example.com/new-4", 4000L),
+                                            ),
+                                        nextKey = "page-3",
+                                    )
+
+                                "page-3" ->
+                                    PagingResult(
+                                        data =
+                                            listOf(
+                                                feed("https://example.com/cached-1", 3000L),
+                                                feed("https://example.com/cached-2", 2000L),
+                                            ),
+                                        nextKey = "older",
+                                    )
+
+                                else -> error("Unexpected append key: ${request.nextKey}")
+                            }
+
+                        is PagingRequest.Prepend -> error("No prepend expected")
+                    }
+                }
+
+            saveToDatabase(
+                db,
+                TimelinePagingMapper.toDb(
+                    data = cached,
+                    pagingKey = loader.pagingKey,
+                ),
+            )
+            val mediator = TimelineRemoteMediator(loader = loader, database = db, allowLongText = false)
+
+            val mediatorResult =
+                mediator.load(
+                    loadType = LoadType.REFRESH,
+                    state =
+                        PagingState(
+                            pages = emptyList(),
+                            anchorPosition = null,
+                            config = PagingConfig(pageSize = 2),
+                            leadingPlaceholderCount = 0,
+                        ),
+                )
+
+            assertTrue(mediatorResult is androidx.paging.RemoteMediator.MediatorResult.Success)
+            assertEquals(
+                listOf(
+                    PagingRequest.Refresh,
+                    PagingRequest.Append("page-2"),
+                    PagingRequest.Append("page-3"),
+                ),
+                loader.requests,
+            )
+
+            val page =
+                db.pagingTimelineDao().getTimelinePage(
+                    pagingKey = loader.pagingKey,
+                    offset = 0,
+                    limit = 20,
+                )
+            val urls =
+                page.mapNotNull {
+                    (it.status.status.data.content as? UiTimelineV2.Feed)?.url
+                }
+
+            assertEquals(
+                listOf(
+                    "https://example.com/new-1",
+                    "https://example.com/new-2",
+                    "https://example.com/new-3",
+                    "https://example.com/new-4",
+                    "https://example.com/cached-1",
+                    "https://example.com/cached-2",
+                    "https://example.com/cached-3",
+                ),
+                urls,
+                "Reader refresh must bridge all pages until the existing cache overlaps",
+            )
         }
 
     @OptIn(ExperimentalPagingApi::class)
