@@ -591,6 +591,102 @@ class MixedRemoteMediatorTest : RobolectricTest() {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
+    fun readerRefreshWithNullableSortProviderPrependsNewPostsBeforeCachedHistory() =
+        runTest {
+            val cached =
+                listOf(
+                    feed("https://example.com/cached-1", 3000L),
+                    feed("https://example.com/cached-2", 2000L),
+                    feed("https://example.com/cached-3", 1000L),
+                )
+            val requests = mutableListOf<PagingRequest>()
+            val loader =
+                object : CacheableRemoteLoader<UiTimelineV2>, SortIdProvider {
+                    override val pagingKey: String = "reader_nullable_sort"
+
+                    override suspend fun load(
+                        pageSize: Int,
+                        request: PagingRequest,
+                    ): PagingResult<UiTimelineV2> {
+                        requests += request
+                        return when (request) {
+                            PagingRequest.Refresh ->
+                                PagingResult(
+                                    data =
+                                        listOf(
+                                            feed("https://example.com/new-1", 5000L),
+                                            feed("https://example.com/new-2", 4000L),
+                                        ),
+                                    nextKey = "page-2",
+                                )
+
+                            is PagingRequest.Append -> {
+                                assertEquals("page-2", request.nextKey)
+                                PagingResult(
+                                    data = listOf(cached.first()),
+                                    nextKey = "older",
+                                )
+                            }
+
+                            is PagingRequest.Prepend -> error("No prepend expected")
+                        }
+                    }
+
+                    override suspend fun sortId(data: UiTimelineV2): Long? = null
+                }
+
+            saveToDatabase(
+                db,
+                TimelinePagingMapper.toDb(
+                    data = cached,
+                    pagingKey = loader.pagingKey,
+                ),
+            )
+            val mediator = TimelineRemoteMediator(loader = loader, database = db, allowLongText = false)
+
+            val mediatorResult =
+                mediator.load(
+                    loadType = LoadType.REFRESH,
+                    state =
+                        PagingState(
+                            pages = emptyList(),
+                            anchorPosition = null,
+                            config = PagingConfig(pageSize = 2),
+                            leadingPlaceholderCount = 0,
+                        ),
+                )
+
+            assertTrue(mediatorResult is androidx.paging.RemoteMediator.MediatorResult.Success)
+            assertEquals(
+                listOf(PagingRequest.Refresh, PagingRequest.Append("page-2")),
+                requests,
+            )
+            val urls =
+                db
+                    .pagingTimelineDao()
+                    .getTimelinePage(
+                        pagingKey = loader.pagingKey,
+                        offset = 0,
+                        limit = 20,
+                    ).mapNotNull {
+                        (it.status.status.data.content as? UiTimelineV2.Feed)?.url
+                    }
+
+            assertEquals(
+                listOf(
+                    "https://example.com/new-1",
+                    "https://example.com/new-2",
+                    "https://example.com/cached-1",
+                    "https://example.com/cached-2",
+                    "https://example.com/cached-3",
+                ),
+                urls,
+                "A nullable SortIdProvider must still prepend fresh items before retained history",
+            )
+        }
+
+    @OptIn(ExperimentalPagingApi::class)
+    @Test
     fun refreshWithMultipleItemsPerSubPersistsSortedOrderInDatabase() =
         runTest {
             val first =
