@@ -473,6 +473,124 @@ class MixedRemoteMediatorTest : RobolectricTest() {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
+    fun readerRefreshKeepsOneHundredCachedPostsAndLastReadAnchorAcrossThirtyNewPosts() =
+        runTest {
+            val cached =
+                (1..100).map { index ->
+                    feed(
+                        "https://example.com/cached-$index",
+                        (101L - index) * 1_000L,
+                    )
+                }
+            val newPosts =
+                (1..30).map { index ->
+                    feed(
+                        "https://example.com/new-$index",
+                        (131L - index) * 1_000L,
+                    )
+                }
+            val pageSize = 10
+            val loader =
+                FakeLoader("reader_long_continuity") { request ->
+                    when (request) {
+                        PagingRequest.Refresh ->
+                            PagingResult(
+                                data = newPosts.subList(0, 10),
+                                nextKey = "page-2",
+                            )
+
+                        is PagingRequest.Append ->
+                            when (request.nextKey) {
+                                "page-2" ->
+                                    PagingResult(
+                                        data = newPosts.subList(10, 20),
+                                        nextKey = "page-3",
+                                    )
+
+                                "page-3" ->
+                                    PagingResult(
+                                        data = newPosts.subList(20, 30),
+                                        nextKey = "page-4",
+                                    )
+
+                                "page-4" ->
+                                    PagingResult(
+                                        data = cached.subList(0, 10),
+                                        nextKey = "older",
+                                    )
+
+                                else -> error("Unexpected append key: ${request.nextKey}")
+                            }
+
+                        is PagingRequest.Prepend -> error("No prepend expected")
+                    }
+                }
+
+            saveToDatabase(
+                db,
+                TimelinePagingMapper.toDb(
+                    data = cached,
+                    pagingKey = loader.pagingKey,
+                ),
+            )
+            val mediator = TimelineRemoteMediator(loader = loader, database = db, allowLongText = false)
+
+            val mediatorResult =
+                mediator.load(
+                    loadType = LoadType.REFRESH,
+                    state =
+                        PagingState(
+                            pages = emptyList(),
+                            anchorPosition = null,
+                            config = PagingConfig(pageSize = pageSize),
+                            leadingPlaceholderCount = 0,
+                        ),
+                )
+
+            assertTrue(mediatorResult is androidx.paging.RemoteMediator.MediatorResult.Success)
+            assertEquals(
+                listOf(
+                    PagingRequest.Refresh,
+                    PagingRequest.Append("page-2"),
+                    PagingRequest.Append("page-3"),
+                    PagingRequest.Append("page-4"),
+                ),
+                loader.requests,
+            )
+
+            val page =
+                db.pagingTimelineDao().getTimelinePage(
+                    pagingKey = loader.pagingKey,
+                    offset = 0,
+                    limit = 200,
+                )
+            val urls =
+                page.mapNotNull {
+                    (it.status.status.data.content as? UiTimelineV2.Feed)?.url
+                }
+            val expectedUrls =
+                newPosts.map { it.url } + cached.map { it.url }
+
+            assertEquals(130, urls.size, "No cached or newly fetched post may disappear")
+            assertEquals(130, urls.toSet().size, "Refresh overlap must not create duplicates")
+            assertEquals(
+                expectedUrls,
+                urls,
+                "Thirty new posts must join seamlessly onto all one hundred cached posts",
+            )
+            assertTrue(
+                "https://example.com/cached-75" in urls,
+                "A deep last-read anchor must remain present after refresh",
+            )
+            assertEquals(
+                104,
+                urls.indexOf("https://example.com/cached-75"),
+                "The deep anchor must remain at the expected position in the continuous timeline",
+            )
+        }
+
+    @OptIn(ExperimentalPagingApi::class)
+    @Test
     fun refreshWithMultipleItemsPerSubPersistsSortedOrderInDatabase() =
         runTest {
             val first =
