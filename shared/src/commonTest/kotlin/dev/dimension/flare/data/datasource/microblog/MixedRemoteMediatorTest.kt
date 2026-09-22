@@ -883,7 +883,7 @@ class MixedRemoteMediatorTest : RobolectricTest() {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
-    fun refreshWithStableSortIdUpdatesCachedRowAndDeletesStaleRows() =
+    fun refreshWithStableSortIdUpdatesCachedRowAndRetainsHistory() =
         runTest {
             var remoteItems =
                 listOf(
@@ -938,14 +938,19 @@ class MixedRemoteMediatorTest : RobolectricTest() {
                     .contentRevision
             assertTrue(revisionAfter > revisionBefore)
             assertEquals(2, initial.size)
-            assertEquals(1, refreshed.size)
-            assertEquals(
-                "updated",
-                (
-                    refreshed
-                        .single()
-                        .baseItem as UiTimelineV2.Feed
-                ).title,
+            assertEquals(2, refreshed.size)
+            val retained =
+                refreshed
+                    .map { it.baseItem }
+                    .filterIsInstance<UiTimelineV2.Feed>()
+                    .single { it.url == "https://example.com/retained" }
+            assertEquals("updated", retained.title)
+            assertTrue(
+                refreshed
+                    .map { it.baseItem }
+                    .filterIsInstance<UiTimelineV2.Feed>()
+                    .any { it.url == "https://example.com/stale" },
+                "Refresh must not delete cached timeline history that may still be unread",
             )
         }
 
