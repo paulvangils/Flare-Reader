@@ -566,7 +566,7 @@ class MixedRemoteMediatorTest : RobolectricTest() {
                 active.requests,
                 "One cached post from a quiet account must not stop catch-up for an active account",
             )
-            assertEquals(listOf(PagingRequest.Refresh), quiet.requests)
+            assertEquals(listOf<PagingRequest>(PagingRequest.Refresh), quiet.requests)
 
             val urls =
                 db
