@@ -536,7 +536,9 @@ class MixedRemoteMediatorTest : RobolectricTest() {
             saveToDatabase(
                 db,
                 TimelinePagingMapper.toDb(
-                    data = listOf(cachedAnchor, cachedOlder),
+                    // Deliberately seed the same kind of bad order V3.2 could leave behind:
+                    // an older cached post before the more recent saved-read boundary.
+                    data = listOf(cachedOlder, cachedAnchor),
                     pagingKey = mixed.pagingKey,
                 ),
             )
@@ -588,7 +590,7 @@ class MixedRemoteMediatorTest : RobolectricTest() {
                     "https://example.com/cached-older",
                 ),
                 urls,
-                "Catch-up pages must form one chronological new prefix and must not move an old cached overlap ahead of the read anchor",
+                "Catch-up must repair an already misordered cache, form one chronological new prefix, and keep the read boundary continuous",
             )
         }
 
