@@ -92,10 +92,13 @@ internal open class TimelineRemoteMediator(
                 )
             }
         val sortIdProvider = loader as? SortIdProvider
+        val providedSortIds =
+            sortIdProvider?.let { provider ->
+                result.data.map { provider.sortId(it) }
+            }
         val sortIds =
             when {
-                sortIdProvider != null -> result.data.map { sortIdProvider.sortId(it) }
-                request is PagingRequest.Refresh -> {
+                request is PagingRequest.Refresh && providedSortIds?.all { it == null } != false -> {
                     val minimumSortId = database.pagingTimelineDao().getMinSortId(pagingKey)
                     if (minimumSortId != null && minimumSortId >= Long.MIN_VALUE + result.data.size) {
                         val firstSortId = minimumSortId - result.data.size
@@ -104,6 +107,7 @@ internal open class TimelineRemoteMediator(
                         emptyList()
                     }
                 }
+                providedSortIds != null -> providedSortIds
                 else -> emptyList()
             }
         val data =
