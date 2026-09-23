@@ -198,7 +198,7 @@ internal class MixedRemoteMediator(
             ) {
                 break
             }
-            request = PagingRequest.Append(nextKey)
+            request = PagingRequest.Append(checkNotNull(nextKey))
         }
 
         return TimeContinuityResponse(
