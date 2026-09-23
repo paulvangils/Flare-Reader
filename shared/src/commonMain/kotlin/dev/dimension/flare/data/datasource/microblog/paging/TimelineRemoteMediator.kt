@@ -20,6 +20,10 @@ import dev.dimension.flare.ui.model.asTimelinePostItem
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 
+internal interface TimelineRefreshContinuityLoader {
+    suspend fun loadContinuityRefresh(pageSize: Int): PagingResult<UiTimelineV2>?
+}
+
 @OptIn(ExperimentalPagingApi::class)
 internal open class TimelineRemoteMediator(
     private val loader: CacheableRemoteLoader<UiTimelineV2>,
@@ -95,7 +99,9 @@ internal open class TimelineRemoteMediator(
             }
         val result =
             if (request is PagingRequest.Refresh) {
-                loadRefreshUntilCachedOverlap(pageSize)
+                (loader as? TimelineRefreshContinuityLoader)
+                    ?.loadContinuityRefresh(pageSize)
+                    ?: loadRefreshUntilCachedOverlap(pageSize)
             } else {
                 timeline(
                     pageSize = pageSize,
