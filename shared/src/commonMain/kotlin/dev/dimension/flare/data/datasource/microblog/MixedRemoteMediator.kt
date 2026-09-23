@@ -145,7 +145,7 @@ internal class MixedRemoteMediator(
         val data =
             responses
                 .flatMap { it.data }
-                .distinctBy(::itemIdentity)
+                .distinctBy { it.accountType to it.statusKey }
                 .sortedBy(::timeSortId)
         val hasMore = responses.any { it.nextKey != null }
         return PagingResult(
@@ -203,7 +203,7 @@ internal class MixedRemoteMediator(
 
         return TimeContinuityResponse(
             source = source,
-            data = combined.distinctBy(::itemIdentity),
+            data = combined.distinctBy { it.accountType to it.statusKey },
             nextKey = nextKey,
             previousKey = previousKey,
         )
