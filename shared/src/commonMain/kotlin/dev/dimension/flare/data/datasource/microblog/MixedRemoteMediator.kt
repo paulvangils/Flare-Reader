@@ -186,10 +186,13 @@ internal class MixedRemoteMediator(
                     .toDb(
                         data = result.data,
                         pagingKey = pagingKey,
-                    ).mapTo(mutableSetOf()) { it.timeline.statusId }
+                    ).map { it.timeline.statusId }
+            // This is already scoped to one remote source. Requiring the complete page to be
+            // cached can chase algorithmic/recommended old posts for dozens of pages. The tail
+            // is the pagination boundary: if that item is retained, this source has rejoined
+            // known history. A pinned/old item near the head cannot end catch-up prematurely.
             val reachedCachedBoundary =
-                pageStatusIds.isNotEmpty() &&
-                    pageStatusIds.all { it in cachedStatusIds }
+                pageStatusIds.lastOrNull() in cachedStatusIds
 
             if (
                 reachedCachedBoundary ||
