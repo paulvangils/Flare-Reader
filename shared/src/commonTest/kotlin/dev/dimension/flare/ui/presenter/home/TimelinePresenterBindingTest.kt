@@ -151,6 +151,22 @@ class TimelinePresenterBindingTest {
         }
 
     @Test
+    fun readerSystemHomeAlwaysUsesGlobalTimeMerge() {
+        assertEquals(
+            TimelineMergePolicy.Time,
+            readerSystemHomeMergePolicy(TimelineMergePolicy.TimePerPage),
+        )
+        assertEquals(
+            TimelineMergePolicy.Time,
+            readerSystemHomeMergePolicy(TimelineMergePolicy.Staggered),
+        )
+        assertEquals(
+            TimelineMergePolicy.Time,
+            readerSystemHomeMergePolicy(null),
+        )
+    }
+
+    @Test
     fun systemHomeMixedTimelineKeepsStableIdButChangesLoaderKeyWhenChildIsDisabled() =
         runTest {
             val firstSlot = homeSlot(accountId = "first")
