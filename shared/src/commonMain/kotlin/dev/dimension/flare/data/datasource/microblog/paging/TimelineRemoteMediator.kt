@@ -84,7 +84,7 @@ internal open class TimelineRemoteMediator(
         pageSize: Int,
         request: PagingRequest,
     ): PagingResult<DbPagingTimelineWithStatus> {
-        var cachedSortIdsByStatusId =
+        val cachedSortIdsByStatusId =
             if (request is PagingRequest.Refresh) {
                 database
                     .pagingTimelineDao()
@@ -107,18 +107,6 @@ internal open class TimelineRemoteMediator(
             sortIdProvider?.let { provider ->
                 result.data.map { provider.sortId(it) }
             }
-        if (
-            request is PagingRequest.Refresh &&
-            providedSortIds?.all { it == null } == true &&
-            cachedSortIdsByStatusId.isNotEmpty() &&
-            repairChronologicalCacheIfNeeded()
-        ) {
-            cachedSortIdsByStatusId =
-                database
-                    .pagingTimelineDao()
-                    .getByPagingKey(pagingKey)
-                    .associate { it.statusId to it.sortId }
-        }
         val sortIds =
             when {
                 request is PagingRequest.Refresh && providedSortIds?.all { it == null } != false -> {
@@ -205,41 +193,6 @@ internal open class TimelineRemoteMediator(
         }
     }
 
-    private suspend fun repairChronologicalCacheIfNeeded(): Boolean {
-        val roots =
-            database
-                .pagingTimelineDao()
-                .getTimelineRootRows(
-                    pagingKey = pagingKey,
-                    offset = 0,
-                    limit = Int.MAX_VALUE,
-                )
-        if (roots.size < 2) {
-            return false
-        }
-
-        fun timestamp(index: Int): Long =
-            roots[index].status.content.createdAt.value.toEpochMilliseconds()
-
-        val needsRepair =
-            (1 until roots.size).any { index ->
-                timestamp(index - 1) < timestamp(index)
-            }
-        if (!needsRepair) {
-            return false
-        }
-
-        val repaired =
-            roots
-                .sortedByDescending {
-                    it.status.content.createdAt.value.toEpochMilliseconds()
-                }.mapIndexed { index, row ->
-                    row.timeline.copy(sortId = index.toLong())
-                }
-        database.pagingTimelineDao().updateExisting(repaired)
-        return true
-    }
-
     private fun refreshSortIds(
         data: List<UiTimelineV2>,
         cachedSortIdsByStatusId: Map<String, Long>,
@@ -317,6 +270,9 @@ internal open class TimelineRemoteMediator(
         request: PagingRequest,
         data: List<DbPagingTimelineWithStatus>,
     ) {
+        if (request is PagingRequest.Refresh) {
+            normalizeCachedSortIdsForProvider()
+        }
         val dataToSave =
             if (request is PagingRequest.Prepend && loader.supportPrepend && data.isNotEmpty()) {
                 val minimumSortId = database.pagingTimelineDao().getMinSortId(pagingKey)
@@ -344,6 +300,42 @@ internal open class TimelineRemoteMediator(
         // never delete older cached rows merely because they were outside the newest page(s).
         saveToDatabase(database, dataToSave)
         enqueuePreTranslation(dataToSave)
+    }
+
+    private suspend fun normalizeCachedSortIdsForProvider() {
+        val provider = loader as? SortIdProvider ?: return
+        val cached =
+            database
+                .pagingTimelineDao()
+                .getTimelinePage(
+                    pagingKey = pagingKey,
+                    offset = 0,
+                    limit = Int.MAX_VALUE,
+                )
+        if (cached.isEmpty()) {
+            return
+        }
+
+        val expectedSortIds =
+            cached.map { row ->
+                provider.sortId(row.statusData.content)
+            }
+        // Nullable providers (notably TimePerPage) deliberately use insertion-based ordering.
+        // Never mix a partial provider order with that scheme.
+        if (expectedSortIds.any { it == null }) {
+            return
+        }
+
+        val changed =
+            cached.mapIndexedNotNull { index, row ->
+                val expected = checkNotNull(expectedSortIds[index])
+                row.timeline
+                    .takeIf { it.sortId != expected }
+                    ?.copy(sortId = expected)
+            }
+        if (changed.isNotEmpty()) {
+            database.pagingTimelineDao().updateExisting(changed)
+        }
     }
 
     protected fun enqueuePreTranslation(dataToSave: List<DbPagingTimelineWithStatus>) {
