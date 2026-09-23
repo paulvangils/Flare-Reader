@@ -110,8 +110,9 @@ public class SystemHomeMixedTimelinePresenter(
 
     private val mergePolicyFlow: Flow<TimelineMergePolicy> by lazy {
         groupTabFlow
-            .map { it?.mergePolicy ?: TimelineMergePolicy.TimePerPage }
-            .distinctUntilChanged()
+            .map { configuredGroup ->
+                readerSystemHomeMergePolicy(configuredGroup?.mergePolicy)
+            }.distinctUntilChanged()
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -145,6 +146,13 @@ public class SystemHomeMixedTimelinePresenter(
                 }
             }
 }
+
+internal fun readerSystemHomeMergePolicy(configured: TimelineMergePolicy?): TimelineMergePolicy =
+    // The Reader promises one chronological stream. TimePerPage only sorts each fetched batch
+    // independently and can place an old item from one account ahead of newer items that are
+    // still on the next page of another account. Keep the persisted setting readable, but the
+    // system-home Reader itself must always use the globally time-ordered merge.
+    TimelineMergePolicy.Time
 
 private fun Flow<List<UiTimelineTabItem>>.distinctUntilChangedByTabIds(): Flow<List<UiTimelineTabItem>> =
     distinctUntilChanged { old, new ->
