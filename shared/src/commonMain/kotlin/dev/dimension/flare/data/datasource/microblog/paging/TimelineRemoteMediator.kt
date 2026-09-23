@@ -61,6 +61,12 @@ internal open class TimelineRemoteMediator(
             return InitializeAction.LAUNCH_INITIAL_REFRESH
         }
 
+        // The Reader can change the system-home merge policy while keeping the same
+        // pagingKey so persisted item keys remain restorable. Normalize retained rows before the
+        // first local page is exposed; otherwise the saved anchor can be restored against the old
+        // TimePerPage sort ids and immediately produce a wildly inflated unread count.
+        normalizeCachedSortIdsForProvider()
+
         val shouldRefresh = refreshOnInitialize()
         suppressInitialPrepend = loader.supportPrepend && !shouldRefresh
         return if (!shouldRefresh || loader.supportPrepend) {
@@ -317,7 +323,7 @@ internal open class TimelineRemoteMediator(
         val cached =
             database
                 .pagingTimelineDao()
-                .getTimelinePage(
+                .getTimelineRootRows(
                     pagingKey = pagingKey,
                     offset = 0,
                     limit = Int.MAX_VALUE,
@@ -328,7 +334,7 @@ internal open class TimelineRemoteMediator(
 
         val expectedSortIds =
             cached.map { row ->
-                provider.sortId(row.statusData.content)
+                provider.sortId(row.status.content)
             }
         // Nullable providers (notably TimePerPage) deliberately use insertion-based ordering.
         // Never mix a partial provider order with that scheme.
