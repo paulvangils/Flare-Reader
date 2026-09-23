@@ -95,22 +95,23 @@ internal fun rememberTimelineWithLazyListState(
     baseState.listState.onSuccess {
         val currentPagingState by rememberUpdatedState(this)
         LaunchedEffect(lazyListState) {
-            var previousKeys = emptySet<String>()
+            var knownKeys = emptySet<String>()
             snapshotFlow {
                 val pagingState = currentPagingState
                 (0 until pagingState.itemCount).mapNotNull { pagingState.peek(it)?.itemKey }
             }.collect { keys ->
                 if (keys.isNotEmpty()) {
-                    // Count the new prefix before the first previously loaded post.
-                    // Scroll indices can already have moved by the time this snapshot arrives.
+                    // Paging can briefly publish a smaller/older generation while a cache-backed
+                    // refresh invalidates and rebuilds its window. Never forget keys already seen:
+                    // otherwise the next generation can count the same new prefix again.
                     if (
-                        previousKeys.isNotEmpty() &&
+                        knownKeys.isNotEmpty() &&
                         !restoringReadPosition &&
                         (!isAtTheTop || preservingRefreshPosition)
                     ) {
-                        newPostCount += keys.takeWhile { it !in previousKeys }.size
+                        newPostCount += keys.takeWhile { it !in knownKeys }.size
                     }
-                    previousKeys = keys.toSet()
+                    knownKeys = knownKeys + keys
                 }
             }
         }
