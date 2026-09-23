@@ -966,6 +966,72 @@ class MixedRemoteMediatorTest : RobolectricTest() {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
+    fun timeMergeRefreshRebasesExistingTimePerPageCacheBeforeCombiningRows() =
+        runTest {
+            val cachedNewest = feed("https://example.com/cached-5000", 5000L)
+            val cachedOld = feed("https://example.com/cached-1000", 1000L)
+            val fresh = feed("https://example.com/fresh-7000", 7000L)
+
+            val source =
+                FakeLoader("a") { request ->
+                    when (request) {
+                        PagingRequest.Refresh ->
+                            PagingResult(
+                                data = listOf(fresh, cachedOld),
+                                nextKey = null,
+                            )
+
+                        is PagingRequest.Append -> error("No append expected")
+                        is PagingRequest.Prepend -> error("No prepend expected")
+                    }
+                }
+            val mixed = MixedRemoteMediator(db, listOf(source), TimelineMergePolicy.Time)
+
+            // Simulate an existing TimePerPage cache: its sort ids describe insertion/page order,
+            // not global timestamps. cachedNewest is deliberately left outside the refresh result
+            // so the refresh must migrate the retained row as well.
+            saveToDatabase(
+                db,
+                TimelinePagingMapper.toDb(
+                    data = listOf(cachedOld, cachedNewest),
+                    pagingKey = mixed.pagingKey,
+                    sortIds = listOf(10L, 20L),
+                ),
+            )
+
+            val mediator = TimelineRemoteMediator(loader = mixed, database = db, allowLongText = false)
+            val result =
+                mediator.load(
+                    loadType = LoadType.REFRESH,
+                    state =
+                        PagingState(
+                            pages = emptyList(),
+                            anchorPosition = null,
+                            config = PagingConfig(pageSize = 20),
+                            leadingPlaceholderCount = 0,
+                        ),
+                )
+
+            assertTrue(result is androidx.paging.RemoteMediator.MediatorResult.Success)
+            val urls =
+                db
+                    .pagingTimelineDao()
+                    .getTimelinePage(mixed.pagingKey, offset = 0, limit = 20)
+                    .mapNotNull { (it.status.status.data.content as? UiTimelineV2.Feed)?.url }
+
+            assertEquals(
+                listOf(
+                    "https://example.com/fresh-7000",
+                    "https://example.com/cached-5000",
+                    "https://example.com/cached-1000",
+                ),
+                urls,
+                "Switching the Reader from TimePerPage to Time must migrate every retained cache row to the same sort-id scheme",
+            )
+        }
+
+    @OptIn(ExperimentalPagingApi::class)
+    @Test
     fun timeMergePolicyKeepsOlderBufferedPageBehindNewerNextPage() =
         runTest {
             val first =
