@@ -13,6 +13,7 @@ import dev.dimension.flare.data.datasource.microblog.paging.PagingResult
 import dev.dimension.flare.data.datasource.microblog.paging.ReportableRemoteLoader
 import dev.dimension.flare.data.datasource.microblog.paging.SortIdProvider
 import dev.dimension.flare.data.datasource.microblog.paging.TimelinePagingMapper
+import dev.dimension.flare.data.datasource.microblog.paging.TimelineRefreshContinuityLoader
 import dev.dimension.flare.data.model.tab.TimelineMergePolicy
 import dev.dimension.flare.ui.model.UiTimelineV2
 import kotlinx.coroutines.async
@@ -25,7 +26,8 @@ internal class MixedRemoteMediator(
     private val mergePolicy: TimelineMergePolicy = TimelineMergePolicy.TimePerPage,
 ) : CacheableRemoteLoader<UiTimelineV2>,
     ReportableRemoteLoader,
-    SortIdProvider {
+    SortIdProvider,
+    TimelineRefreshContinuityLoader {
     override val pagingKey =
         buildString {
             append("mixed_timeline")
@@ -97,6 +99,115 @@ internal class MixedRemoteMediator(
                 )
             }
         }
+
+    override suspend fun loadContinuityRefresh(pageSize: Int): PagingResult<UiTimelineV2>? {
+        if (mergePolicy != TimelineMergePolicy.Time) {
+            return null
+        }
+
+        val cachedStatusIds =
+            database
+                .pagingTimelineDao()
+                .getStatusIdsWithInlineParents(pagingKey)
+                .toSet()
+        if (cachedStatusIds.isEmpty()) {
+            return null
+        }
+
+        resetTimeStaging()
+
+        val responses =
+            coroutineScope {
+                timeSources
+                    .map { source ->
+                        async {
+                            loadTimeSourceUntilCachedBoundary(
+                                source = source,
+                                pageSize = pageSize,
+                                cachedStatusIds = cachedStatusIds,
+                            )
+                        }
+                    }.awaitAll()
+            }
+
+        database.connect {
+            responses.forEach { response ->
+                database.pagingTimelineDao().insertPagingKey(
+                    DbPagingKey(
+                        pagingKey = response.source.stagingKey,
+                        nextKey = response.nextKey,
+                        prevKey = response.previousKey,
+                    ),
+                )
+            }
+        }
+
+        val data =
+            responses
+                .flatMap { it.data }
+                .distinctBy(::itemIdentity)
+                .sortedBy(::timeSortId)
+        val hasMore = responses.any { it.nextKey != null }
+        return PagingResult(
+            data = data,
+            nextKey = if (hasMore) MIXED_NEXT_KEY else null,
+            previousKey = null,
+        )
+    }
+
+    private suspend fun loadTimeSourceUntilCachedBoundary(
+        source: TimeSource,
+        pageSize: Int,
+        cachedStatusIds: Set<String>,
+    ): TimeContinuityResponse {
+        val combined = ArrayList<UiTimelineV2>()
+        var request: PagingRequest = PagingRequest.Refresh
+        var nextKey: String? = null
+        var previousKey: String? = null
+        var pagesLoaded = 0
+
+        while (true) {
+            val result =
+                runCatching {
+                    source.mediator.load(pageSize, request)
+                }.getOrElse {
+                    reportError?.invoke(it)
+                    PagingResult(endOfPaginationReached = true)
+                }
+            if (pagesLoaded == 0) {
+                previousKey = result.previousKey
+            }
+            combined += result.data
+            pagesLoaded += 1
+            nextKey = result.nextKey
+
+            val pageStatusIds =
+                TimelinePagingMapper
+                    .toDb(
+                        data = result.data,
+                        pagingKey = pagingKey,
+                    ).mapTo(mutableSetOf()) { it.timeline.statusId }
+            val reachedCachedBoundary =
+                pageStatusIds.isNotEmpty() &&
+                    pageStatusIds.all { it in cachedStatusIds }
+
+            if (
+                reachedCachedBoundary ||
+                nextKey == null ||
+                pagesLoaded >= MAX_TIME_REFRESH_CATCH_UP_PAGES
+            ) {
+                break
+            }
+            request = PagingRequest.Append(nextKey)
+        }
+
+        return TimeContinuityResponse(
+            source = source,
+            data = combined.distinctBy(::itemIdentity),
+            nextKey = nextKey,
+            previousKey = previousKey,
+        )
+    }
 
     private suspend fun loadTimeOrdered(
         pageSize: Int,
@@ -398,6 +509,13 @@ internal class MixedRemoteMediator(
             }
     }
 
+    private data class TimeContinuityResponse(
+        val source: TimeSource,
+        val data: List<UiTimelineV2>,
+        val nextKey: String?,
+        val previousKey: String?,
+    )
+
     private data class TimeSubResponse(
         val state: TimeSourceState,
         val result: PagingResult<UiTimelineV2>,
@@ -407,6 +525,7 @@ internal class MixedRemoteMediator(
     private companion object {
         private const val MIXED_NEXT_KEY = "mixed_next_key"
         private const val SORT_ID_TIE_BUCKET = 10_000L
+        private const val MAX_TIME_REFRESH_CATCH_UP_PAGES = 50
         private const val TIME_STAGING_SUFFIX = ":time_staging:"
         private val TIME_STAGING_TRANSLATION_OPTIONS =
             TranslationDisplayOptions(
