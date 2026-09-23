@@ -966,6 +966,53 @@ class MixedRemoteMediatorTest : RobolectricTest() {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
+    fun timeMergeInitializeMigratesOldSortIdsBeforeReaderRestoresAnchor() =
+        runTest {
+            val cachedOld = feed("https://example.com/cached-1000", 1000L)
+            val cachedNewest = feed("https://example.com/cached-5000", 5000L)
+            val source = FakeLoader("initialize-time-migration") { error("No network load expected during initialize") }
+            val mixed = MixedRemoteMediator(db, listOf(source), TimelineMergePolicy.Time)
+
+            saveToDatabase(
+                db,
+                TimelinePagingMapper.toDb(
+                    data = listOf(cachedOld, cachedNewest),
+                    pagingKey = mixed.pagingKey,
+                    sortIds = listOf(10L, 20L),
+                ),
+            )
+
+            val mediator =
+                TimelineRemoteMediator(
+                    loader = mixed,
+                    database = db,
+                    allowLongText = false,
+                    refreshOnInitialize = { false },
+                )
+
+            assertEquals(
+                androidx.paging.RemoteMediator.InitializeAction.SKIP_INITIAL_REFRESH,
+                mediator.initialize(),
+            )
+            assertTrue(source.requests.isEmpty())
+
+            val urls =
+                db
+                    .pagingTimelineDao()
+                    .getTimelinePage(mixed.pagingKey, offset = 0, limit = 20)
+                    .mapNotNull { (it.status.status.data.content as? UiTimelineV2.Feed)?.url }
+            assertEquals(
+                listOf(
+                    "https://example.com/cached-5000",
+                    "https://example.com/cached-1000",
+                ),
+                urls,
+                "Reader cache must be chronological before persisted read-position restoration starts",
+            )
+        }
+
+    @OptIn(ExperimentalPagingApi::class)
+    @Test
     fun timeMergeRefreshCatchUpConsumesSuccessiveRemotePagesBeforeReturning() =
         runTest {
             val cached = feed("https://example.com/cached-1000", 1000L)
