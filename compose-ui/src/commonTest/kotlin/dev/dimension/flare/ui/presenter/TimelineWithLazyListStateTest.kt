@@ -310,6 +310,29 @@ class TimelineWithLazyListStateTest {
         }
 
     @Test
+    fun pagingGenerationCannotCountTheSameNewPrefixTwice() =
+        withTimelineState { pages, states, _ ->
+            pages.value = page(-3..1)
+            runCurrent()
+            assertEquals(3, states.last().newPostsCount)
+
+            // Simulate a transient cache-backed generation that temporarily exposes only
+            // the previously known rows. The next full generation must not rediscover and
+            // recount the same three new posts.
+            pages.value = page(0..1)
+            runCurrent()
+            assertEquals(3, states.last().newPostsCount)
+
+            pages.value = page(-3..1)
+            runCurrent()
+            assertEquals(
+                3,
+                states.last().newPostsCount,
+                "The same Paging generation prefix must never be added to the unread counter twice",
+            )
+        }
+
+    @Test
     fun newPostsCountAccumulatesAcrossRefreshes() =
         withTimelineState { pages, states, _ ->
             pages.value = page(-1..1)
