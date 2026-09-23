@@ -101,6 +101,7 @@ internal open class TimelineRemoteMediator(
             if (request is PagingRequest.Refresh) {
                 (loader as? TimelineRefreshContinuityLoader)
                     ?.loadContinuityRefresh(pageSize)
+                    ?.let(::applyLoaderPostProcessing)
                     ?: loadRefreshUntilCachedOverlap(pageSize)
             } else {
                 timeline(
@@ -253,6 +254,18 @@ internal open class TimelineRemoteMediator(
         }
     }
 
+    private fun applyLoaderPostProcessing(
+        result: PagingResult<UiTimelineV2>,
+    ): PagingResult<UiTimelineV2> =
+        result.copy(
+            data =
+                if (loader.collapseReplyChains) {
+                    result.data.collapseReplyChains()
+                } else {
+                    result.data
+                },
+        )
+
     suspend fun timeline(
         pageSize: Int,
         request: PagingRequest,
@@ -261,16 +274,7 @@ internal open class TimelineRemoteMediator(
             .load(
                 pageSize = pageSize,
                 request = request,
-            ).let { result ->
-                result.copy(
-                    data =
-                        if (loader.collapseReplyChains) {
-                            result.data.collapseReplyChains()
-                        } else {
-                            result.data
-                        },
-                )
-            }
+            ).let(::applyLoaderPostProcessing)
 
     override suspend fun onSaveCache(
         request: PagingRequest,
