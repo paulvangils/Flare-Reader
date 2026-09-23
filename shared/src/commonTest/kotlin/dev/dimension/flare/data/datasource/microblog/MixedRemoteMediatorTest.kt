@@ -966,6 +966,115 @@ class MixedRemoteMediatorTest : RobolectricTest() {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
+    fun timeMergeCatchUpReachesCacheBoundaryIndependentlyForEverySource() =
+        runTest {
+            val activeCached = feed("https://example.com/active-cached-1000", 1000L)
+            val quietCached = feed("https://example.com/quiet-cached-900", 900L)
+
+            val active =
+                FakeLoader("active-time") { request ->
+                    when (request) {
+                        PagingRequest.Refresh ->
+                            PagingResult(
+                                data = listOf(feed("https://example.com/active-new-3000", 3000L)),
+                                nextKey = "active-2",
+                            )
+
+                        is PagingRequest.Append ->
+                            when (request.nextKey) {
+                                "active-2" ->
+                                    PagingResult(
+                                        data = listOf(feed("https://example.com/active-new-2000", 2000L)),
+                                        nextKey = "active-3",
+                                    )
+
+                                "active-3" ->
+                                    PagingResult(
+                                        data = listOf(activeCached),
+                                        nextKey = "active-older",
+                                    )
+
+                                else -> error("Unexpected active append key: ${request.nextKey}")
+                            }
+
+                        is PagingRequest.Prepend -> error("No prepend expected")
+                    }
+                }
+            val quiet =
+                FakeLoader("quiet-time") { request ->
+                    when (request) {
+                        PagingRequest.Refresh ->
+                            PagingResult(
+                                data =
+                                    listOf(
+                                        feed("https://example.com/quiet-new-1500", 1500L),
+                                        quietCached,
+                                    ),
+                                nextKey = "quiet-older",
+                            )
+
+                        is PagingRequest.Append -> error("Quiet source must already be connected to retained history")
+                        is PagingRequest.Prepend -> error("No prepend expected")
+                    }
+                }
+
+            val mixed = MixedRemoteMediator(db, listOf(active, quiet), TimelineMergePolicy.Time)
+            saveToDatabase(
+                db,
+                TimelinePagingMapper.toDb(
+                    data = listOf(activeCached, quietCached),
+                    pagingKey = mixed.pagingKey,
+                    sortIds = listOf(10L, 20L),
+                ),
+            )
+            val mediator = TimelineRemoteMediator(loader = mixed, database = db, allowLongText = false)
+
+            val result =
+                mediator.load(
+                    loadType = LoadType.REFRESH,
+                    state =
+                        PagingState(
+                            pages = emptyList(),
+                            anchorPosition = null,
+                            config = PagingConfig(pageSize = 2),
+                            leadingPlaceholderCount = 0,
+                        ),
+                )
+
+            assertTrue(result is androidx.paging.RemoteMediator.MediatorResult.Success)
+            assertEquals(
+                listOf<PagingRequest>(
+                    PagingRequest.Refresh,
+                    PagingRequest.Append("active-2"),
+                    PagingRequest.Append("active-3"),
+                ),
+                active.requests,
+            )
+            assertEquals(
+                listOf<PagingRequest>(PagingRequest.Refresh),
+                quiet.requests,
+                "A quiet account reaching its own cached tail must not stop or extend the active account catch-up",
+            )
+
+            val urls =
+                db
+                    .pagingTimelineDao()
+                    .getTimelinePage(mixed.pagingKey, offset = 0, limit = 20)
+                    .mapNotNull { (it.status.status.data.content as? UiTimelineV2.Feed)?.url }
+            assertEquals(
+                listOf(
+                    "https://example.com/active-new-3000",
+                    "https://example.com/active-new-2000",
+                    "https://example.com/quiet-new-1500",
+                    "https://example.com/active-cached-1000",
+                    "https://example.com/quiet-cached-900",
+                ),
+                urls,
+            )
+        }
+
+    @OptIn(ExperimentalPagingApi::class)
+    @Test
     fun timeMergeInitializeMigratesOldSortIdsBeforeReaderRestoresAnchor() =
         runTest {
             val cachedOld = feed("https://example.com/cached-1000", 1000L)
