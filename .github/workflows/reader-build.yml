@@ -42,8 +42,9 @@ jobs:
           ALLOWED_1="shared/src/commonMain/kotlin/dev/dimension/flare/data/datasource/microblog/paging/TimelineRemoteMediator.kt"
           ALLOWED_2="shared/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/home/TimelinePresenter.kt"
           ALLOWED_3="shared/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/home/MixedTimelinePresenter.kt"
-          git diff --name-only "$BASE" --             shared/src/commonMain/kotlin/dev/dimension/flare/data/datasource/microblog/paging             shared/src/commonMain/kotlin/dev/dimension/flare/data/database/cache             shared/src/commonMain/kotlin/dev/dimension/flare/data/network             shared/src/commonMain/kotlin/dev/dimension/flare/shared/image             shared/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/home/TimelinePresenter.kt             shared/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/home/MixedTimelinePresenter.kt             social             | while read -r path; do
-                if [ "$path" != "$ALLOWED_1" ] && [ "$path" != "$ALLOWED_2" ] && [ "$path" != "$ALLOWED_3" ]; then
+          ALLOWED_4="shared/src/commonMain/kotlin/dev/dimension/flare/data/datasource/microblog/MixedRemoteMediator.kt"
+          git diff --name-only "$BASE" --             shared/src/commonMain/kotlin/dev/dimension/flare/data/datasource/microblog/paging             shared/src/commonMain/kotlin/dev/dimension/flare/data/datasource/microblog/MixedRemoteMediator.kt             shared/src/commonMain/kotlin/dev/dimension/flare/data/database/cache             shared/src/commonMain/kotlin/dev/dimension/flare/data/network             shared/src/commonMain/kotlin/dev/dimension/flare/shared/image             shared/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/home/TimelinePresenter.kt             shared/src/commonMain/kotlin/dev/dimension/flare/ui/presenter/home/MixedTimelinePresenter.kt             social             | while read -r path; do
+                if [ "$path" != "$ALLOWED_1" ] && [ "$path" != "$ALLOWED_2" ] && [ "$path" != "$ALLOWED_3" ] && [ "$path" != "$ALLOWED_4" ]; then
                   echo "Unexpected protected-code change: $path"
                   exit 1
                 fi
