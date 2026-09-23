@@ -191,8 +191,9 @@ internal class MixedRemoteMediator(
             // cached can chase algorithmic/recommended old posts for dozens of pages. The tail
             // is the pagination boundary: if that item is retained, this source has rejoined
             // known history. A pinned/old item near the head cannot end catch-up prematurely.
+            val tailStatusId = pageStatusIds.lastOrNull()
             val reachedCachedBoundary =
-                pageStatusIds.lastOrNull() in cachedStatusIds
+                tailStatusId != null && tailStatusId in cachedStatusIds
 
             if (
                 reachedCachedBoundary ||
