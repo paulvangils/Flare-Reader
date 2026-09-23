@@ -966,6 +966,92 @@ class MixedRemoteMediatorTest : RobolectricTest() {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
+    fun timeMergeRefreshCatchUpConsumesSuccessiveRemotePagesBeforeReturning() =
+        runTest {
+            val cached = feed("https://example.com/cached-1000", 1000L)
+            val firstNew = feed("https://example.com/new-3000", 3000L)
+            val secondNew = feed("https://example.com/new-2000", 2000L)
+
+            val source =
+                FakeLoader("time-catch-up") { request ->
+                    when (request) {
+                        PagingRequest.Refresh ->
+                            PagingResult(
+                                data = listOf(firstNew),
+                                nextKey = "page-2",
+                            )
+
+                        is PagingRequest.Append ->
+                            when (request.nextKey) {
+                                "page-2" ->
+                                    PagingResult(
+                                        data = listOf(secondNew),
+                                        nextKey = "page-3",
+                                    )
+
+                                "page-3" ->
+                                    PagingResult(
+                                        data = listOf(cached),
+                                        nextKey = "older",
+                                    )
+
+                                else -> error("Unexpected append key: ${request.nextKey}")
+                            }
+
+                        is PagingRequest.Prepend -> error("No prepend expected")
+                    }
+                }
+            val mixed = MixedRemoteMediator(db, listOf(source), TimelineMergePolicy.Time)
+            saveToDatabase(
+                db,
+                TimelinePagingMapper.toDb(
+                    data = listOf(cached),
+                    pagingKey = mixed.pagingKey,
+                    sortIds = listOf(10L),
+                ),
+            )
+            val mediator = TimelineRemoteMediator(loader = mixed, database = db, allowLongText = false)
+
+            val result =
+                mediator.load(
+                    loadType = LoadType.REFRESH,
+                    state =
+                        PagingState(
+                            pages = emptyList(),
+                            anchorPosition = null,
+                            config = PagingConfig(pageSize = 1),
+                            leadingPlaceholderCount = 0,
+                        ),
+                )
+
+            assertTrue(result is androidx.paging.RemoteMediator.MediatorResult.Success)
+            assertEquals(
+                listOf<PagingRequest>(
+                    PagingRequest.Refresh,
+                    PagingRequest.Append("page-2"),
+                    PagingRequest.Append("page-3"),
+                ),
+                source.requests,
+                "A single Time refresh must really advance through remote pages until retained history is reached",
+            )
+
+            val urls =
+                db
+                    .pagingTimelineDao()
+                    .getTimelinePage(mixed.pagingKey, offset = 0, limit = 20)
+                    .mapNotNull { (it.status.status.data.content as? UiTimelineV2.Feed)?.url }
+            assertEquals(
+                listOf(
+                    "https://example.com/new-3000",
+                    "https://example.com/new-2000",
+                    "https://example.com/cached-1000",
+                ),
+                urls,
+            )
+        }
+
+    @OptIn(ExperimentalPagingApi::class)
+    @Test
     fun timeMergeRefreshRebasesExistingTimePerPageCacheBeforeCombiningRows() =
         runTest {
             val cachedNewest = feed("https://example.com/cached-5000", 5000L)
