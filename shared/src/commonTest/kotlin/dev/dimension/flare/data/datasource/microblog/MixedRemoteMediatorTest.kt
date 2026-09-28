@@ -473,7 +473,7 @@ class MixedRemoteMediatorTest : RobolectricTest() {
 
     @OptIn(ExperimentalPagingApi::class)
     @Test
-    fun readerRefreshDoesNotTreatOneQuietAccountOverlapAsContinuityBoundary() =
+    fun readerTimeRefreshDoesNotTreatOneQuietAccountOverlapAsContinuityBoundary() =
         runTest {
             val cachedAnchor = feed("https://example.com/cached-anchor", 3000L)
             val cachedOlder = feed("https://example.com/cached-older", 1000L)
@@ -532,7 +532,7 @@ class MixedRemoteMediatorTest : RobolectricTest() {
                         is PagingRequest.Prepend -> error("No prepend expected")
                     }
                 }
-            val mixed = MixedRemoteMediator(db, listOf(active, quiet))
+            val mixed = MixedRemoteMediator(db, listOf(active, quiet), TimelineMergePolicy.Time)
             saveToDatabase(
                 db,
                 TimelinePagingMapper.toDb(
