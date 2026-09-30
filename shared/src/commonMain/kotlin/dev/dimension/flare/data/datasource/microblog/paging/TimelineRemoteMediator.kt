@@ -9,6 +9,7 @@ import dev.dimension.flare.data.database.cache.CacheDatabase
 import dev.dimension.flare.data.database.cache.mapper.saveToDatabase
 import dev.dimension.flare.data.database.cache.model.DbPagingTimelineWithStatus
 import dev.dimension.flare.data.database.cache.model.DbStatus
+import dev.dimension.flare.data.repository.DebugRepository
 import dev.dimension.flare.data.translation.NoopPreTranslationService
 import dev.dimension.flare.data.translation.PreTranslationService
 import dev.dimension.flare.model.AccountType
@@ -103,6 +104,16 @@ internal open class TimelineRemoteMediator(
             } else {
                 emptyMap()
             }
+        if (request is PagingRequest.Refresh && DebugRepository.isEnabled) {
+            val cachedRows =
+                database
+                    .pagingTimelineDao()
+                    .getTimelineRootRows(pagingKey = pagingKey, offset = 0, limit = Int.MAX_VALUE)
+            val cachedTimes = cachedRows.map { it.status.content.createdAt.value.toEpochMilliseconds() }
+            DebugRepository.log(
+                "reader.cache.beforeRefresh rows=${cachedRows.size} newestMs=${cachedTimes.maxOrNull()} oldestMs=${cachedTimes.minOrNull()}",
+            )
+        }
         val result =
             if (request is PagingRequest.Refresh) {
                 (loader as? TimelineRefreshContinuityLoader)
@@ -132,6 +143,12 @@ internal open class TimelineRemoteMediator(
                 providedSortIds != null -> providedSortIds
                 else -> emptyList()
             }
+        if (request is PagingRequest.Refresh) {
+            val resultTimes = result.data.map { it.createdAt.value.toEpochMilliseconds() }
+            DebugRepository.log(
+                "reader.refresh.result items=${result.data.size} newestMs=${resultTimes.maxOrNull()} oldestMs=${resultTimes.minOrNull()} next=${result.nextKey != null}",
+            )
+        }
         val data =
             TimelinePagingMapper.toDb(
                 data = result.data,
@@ -315,6 +332,18 @@ internal open class TimelineRemoteMediator(
         // Reader refreshes are continuity-preserving: update/insert the fetched range, but
         // never delete older cached rows merely because they were outside the newest page(s).
         saveToDatabase(database, dataToSave)
+        if (request is PagingRequest.Refresh && DebugRepository.isEnabled) {
+            val rows =
+                database
+                    .pagingTimelineDao()
+                    .getTimelineRootRows(pagingKey = pagingKey, offset = 0, limit = Int.MAX_VALUE)
+            val times = rows.map { it.status.content.createdAt.value.toEpochMilliseconds() }
+            val chronologyViolations =
+                times.zipWithNext().count { (first, second) -> first < second }
+            DebugRepository.log(
+                "reader.cache.afterRefresh rows=${rows.size} newestMs=${times.maxOrNull()} oldestMs=${times.minOrNull()} chronologyViolations=$chronologyViolations",
+            )
+        }
         enqueuePreTranslation(dataToSave)
     }
 
