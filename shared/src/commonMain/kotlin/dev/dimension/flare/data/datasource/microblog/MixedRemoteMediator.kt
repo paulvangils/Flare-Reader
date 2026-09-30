@@ -186,13 +186,18 @@ internal class MixedRemoteMediator(
         var nextKey: String? = null
         var previousKey: String? = null
         var pagesLoaded = 0
+        val sourceStartedAt = Clock.System.now().toEpochMilliseconds()
 
         while (true) {
+            val requestStartedAt = Clock.System.now().toEpochMilliseconds()
             val result =
                 runCatching {
                     source.mediator.load(pageSize, request)
                 }.getOrElse {
                     reportError?.invoke(it)
+                    DebugRepository.log(
+                        "reader.refresh source=${source.diagnosticIndex} request=${request.diagnosticName()} error=${it::class.simpleName}",
+                    )
                     PagingResult(endOfPaginationReached = true)
                 }
             if (pagesLoaded == 0) {
@@ -215,12 +220,40 @@ internal class MixedRemoteMediator(
             val tailStatusId = pageStatusIds.lastOrNull()
             val reachedCachedBoundary =
                 tailStatusId != null && tailStatusId in cachedStatusIds
+            val knownItems = pageStatusIds.count { it in cachedStatusIds }
+            val outOfOrderPairs =
+                result.data
+                    .zipWithNext()
+                    .count { (first, second) ->
+                        first.createdAt.value < second.createdAt.value
+                    }
+            DebugRepository.log(
+                buildString {
+                    append("reader.refresh.page")
+                    append(" source=${source.diagnosticIndex}")
+                    append(" page=$pagesLoaded")
+                    append(" request=${request.diagnosticName()}")
+                    append(" items=${result.data.size}")
+                    append(" known=$knownItems")
+                    append(" tailKnown=$reachedCachedBoundary")
+                    append(" next=${nextKey != null}")
+                    append(" outOfOrderPairs=$outOfOrderPairs")
+                    append(" ${result.data.diagnosticTimeRange()}")
+                    append(" requestMs=${Clock.System.now().toEpochMilliseconds() - requestStartedAt}")
+                },
+            )
 
-            if (
-                reachedCachedBoundary ||
-                nextKey == null ||
-                pagesLoaded >= MAX_TIME_REFRESH_CATCH_UP_PAGES
-            ) {
+            val stopReason =
+                when {
+                    reachedCachedBoundary -> "cached-tail"
+                    nextKey == null -> "no-next-key"
+                    pagesLoaded >= MAX_TIME_REFRESH_CATCH_UP_PAGES -> "page-safety-limit"
+                    else -> null
+                }
+            if (stopReason != null) {
+                DebugRepository.log(
+                    "reader.refresh.source.done source=${source.diagnosticIndex} pages=$pagesLoaded items=${combined.size} unique=${combined.distinctBy { it.accountType to it.statusKey }.size} stop=$stopReason durationMs=${Clock.System.now().toEpochMilliseconds() - sourceStartedAt}",
+                )
                 break
             }
             request = PagingRequest.Append(checkNotNull(nextKey))
@@ -547,6 +580,26 @@ internal class MixedRemoteMediator(
         val result: PagingResult<UiTimelineV2>,
         val stagedItems: List<DbPagingTimelineWithStatus>,
     )
+
+    private fun PagingRequest.diagnosticName(): String =
+        when (this) {
+            PagingRequest.Refresh -> "refresh"
+            is PagingRequest.Append -> "append"
+            is PagingRequest.Prepend -> "prepend"
+        }
+
+    private fun List<UiTimelineV2>.diagnosticTimeRange(): String {
+        if (isEmpty()) {
+            return "timeRange=empty"
+        }
+        val times = map { it.createdAt.value.toEpochMilliseconds() }
+        return buildString {
+            append("newestMs=${times.maxOrNull()}")
+            append(" oldestMs=${times.minOrNull()}")
+            append(" firstMs=${first().createdAt.value.toEpochMilliseconds()}")
+            append(" tailMs=${last().createdAt.value.toEpochMilliseconds()}")
+        }
+    }
 
     private companion object {
         private const val MIXED_NEXT_KEY = "mixed_next_key"
