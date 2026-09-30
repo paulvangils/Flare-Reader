@@ -65,6 +65,10 @@ internal object DebugRepository {
     internal fun printToString(): String = LogSanitizer.sanitize(_messages.value.joinToString(separator = "\n"))
 }
 
+public fun debugLog(message: String) {
+    DebugRepository.log(message)
+}
+
 /**
  * Executes the given [block] function and returns its encapsulated result as [Result].
  *
