@@ -596,8 +596,8 @@ internal class MixedRemoteMediator(
         return buildString {
             append("newestMs=${times.maxOrNull()}")
             append(" oldestMs=${times.minOrNull()}")
-            append(" firstMs=${first().createdAt.value.toEpochMilliseconds()}")
-            append(" tailMs=${last().createdAt.value.toEpochMilliseconds()}")
+            append(" firstMs=${this@diagnosticTimeRange.first().createdAt.value.toEpochMilliseconds()}")
+            append(" tailMs=${this@diagnosticTimeRange.last().createdAt.value.toEpochMilliseconds()}")
         }
     }
 
