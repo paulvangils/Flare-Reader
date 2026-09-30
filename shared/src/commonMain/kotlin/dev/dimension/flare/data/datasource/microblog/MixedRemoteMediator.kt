@@ -15,10 +15,12 @@ import dev.dimension.flare.data.datasource.microblog.paging.SortIdProvider
 import dev.dimension.flare.data.datasource.microblog.paging.TimelinePagingMapper
 import dev.dimension.flare.data.datasource.microblog.paging.TimelineRefreshContinuityLoader
 import dev.dimension.flare.data.model.tab.TimelineMergePolicy
+import dev.dimension.flare.data.repository.DebugRepository
 import dev.dimension.flare.ui.model.UiTimelineV2
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlin.time.Clock
 
 internal class MixedRemoteMediator(
     private val database: CacheDatabase,
@@ -38,7 +40,11 @@ internal class MixedRemoteMediator(
     private var currentMediators = mediators
     private val timeSources =
         mediators.mapIndexed { index, mediator ->
-            TimeSource(mediator, "$pagingKey$TIME_STAGING_SUFFIX$index")
+            TimeSource(
+                mediator = mediator,
+                stagingKey = "$pagingKey$TIME_STAGING_SUFFIX$index",
+                diagnosticIndex = index + 1,
+            )
         }
 
     override var reportError: ((Throwable) -> Unit)? = null
@@ -494,6 +500,7 @@ internal class MixedRemoteMediator(
     private data class TimeSource(
         val mediator: CacheableRemoteLoader<UiTimelineV2>,
         val stagingKey: String,
+        val diagnosticIndex: Int,
     )
 
     private class TimeSourceState(
