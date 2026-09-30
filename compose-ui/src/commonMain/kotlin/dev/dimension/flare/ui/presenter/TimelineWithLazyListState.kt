@@ -21,6 +21,7 @@ import dev.dimension.flare.common.onSuccess
 import dev.dimension.flare.data.datastore.model.ReaderTimelinePosition
 import dev.dimension.flare.data.model.tab.UiTimelineTabItem
 import dev.dimension.flare.data.repository.ReaderPositionRepository
+import dev.dimension.flare.data.repository.debugLog
 import dev.dimension.flare.data.repository.ReaderPositionStore
 import dev.dimension.flare.di.koinInject
 import dev.dimension.flare.ui.model.UiTimelineV2
@@ -179,12 +180,14 @@ internal fun rememberTimelineWithLazyListState(
     suspend fun findTimelineItemAcrossPages(itemKey: String): Pair<PagingState.Success<UiTimelineV2>, Int>? {
         var pagingState = currentBaseState.listState
         var appendLoads = 0
+        debugLog("reader.anchor.restore searchStart keyHash=${itemKey.hashCode()}")
 
         while (appendLoads <= MAX_ANCHOR_APPEND_LOADS) {
             val success = pagingState as? PagingState.Success
             if (success != null && !pagingState.isRefreshing) {
                 val index = success.indexOfItemKey(itemKey)
                 if (index >= 0) {
+                    debugLog("reader.anchor.restore found keyHash=${itemKey.hashCode()} index=$index appendLoads=$appendLoads itemCount=${success.itemCount}")
                     return success to index
                 }
 
@@ -195,6 +198,7 @@ internal fun rememberTimelineWithLazyListState(
                         if (success.appendState.endOfPaginationReached || success.itemCount == 0) {
                             return null
                         }
+                        debugLog("reader.anchor.restore forceAppend keyHash=${itemKey.hashCode()} nextAttempt=${appendLoads + 1} itemCount=${success.itemCount}")
                         success[success.itemCount - 1]
                         appendLoads += 1
                     }
@@ -217,6 +221,7 @@ internal fun rememberTimelineWithLazyListState(
                 } ?: return null
         }
 
+        debugLog("reader.anchor.restore notFound keyHash=${itemKey.hashCode()} appendLoads=$appendLoads")
         return null
     }
 
@@ -224,6 +229,9 @@ internal fun rememberTimelineWithLazyListState(
         val beforeState = currentBaseState
         val beforePagingState = beforeState.listState
         val anchor = captureTimelineScrollAnchor(beforePagingState, lazyListState)
+        debugLog(
+            "reader.anchor.refresh start keyHash=${anchor?.itemKey?.hashCode()} oldIndex=${anchor?.pagingIndex} beforeCount=${(beforePagingState as? PagingState.Success)?.itemCount}",
+        )
         preservingRefreshPosition = anchor != null
         try {
             beforeState.refreshSuspend()
@@ -258,6 +266,9 @@ internal fun rememberTimelineWithLazyListState(
 
                 val refreshedIndex = success.indexOfItemKey(anchor.itemKey)
                 if (refreshedIndex < 0) {
+                    debugLog(
+                        "reader.anchor.refresh missing keyHash=${anchor.itemKey.hashCode()} appendLoads=$appendLoads itemCount=${success.itemCount} end=${success.appendState.endOfPaginationReached}",
+                    )
                     when (success.appendState) {
                         is LoadState.Error -> return
                         is LoadState.Loading -> Unit
@@ -266,6 +277,9 @@ internal fun rememberTimelineWithLazyListState(
                                 return
                             }
                             // Reading the tail emits a Paging append hint without moving the grid.
+                            debugLog(
+                                "reader.anchor.refresh forceAppend keyHash=${anchor.itemKey.hashCode()} nextAttempt=${appendLoads + 1} itemCount=${success.itemCount}",
+                            )
                             success[success.itemCount - 1]
                             appendLoads += 1
                         }
@@ -288,7 +302,11 @@ internal fun rememberTimelineWithLazyListState(
                     continue
                 }
 
+                debugLog(
+                    "reader.anchor.refresh found keyHash=${anchor.itemKey.hashCode()} newIndex=$refreshedIndex appendLoads=$appendLoads itemCount=${success.itemCount}",
+                )
                 if (!applyTimelineAnchor(anchor, refreshedIndex)) {
+                    debugLog("reader.anchor.refresh applyFailed keyHash=${anchor.itemKey.hashCode()} newIndex=$refreshedIndex")
                     return
                 }
 
@@ -309,6 +327,9 @@ internal fun rememberTimelineWithLazyListState(
                     // Final re-application after the quiet period protects against a late grid
                     // remeasure using stale pre-refresh indices.
                     applyTimelineAnchor(anchor, latestIndex)
+                    debugLog(
+                        "reader.anchor.refresh restored keyHash=${anchor.itemKey.hashCode()} finalIndex=$latestIndex appendLoads=$appendLoads",
+                    )
                     return
                 }
 
