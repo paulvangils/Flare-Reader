@@ -111,15 +111,20 @@ internal class MixedRemoteMediator(
             return null
         }
 
+        val refreshStartedAt = Clock.System.now().toEpochMilliseconds()
         val cachedStatusIds =
             database
                 .pagingTimelineDao()
                 .getStatusIdsWithInlineParents(pagingKey)
                 .toSet()
         if (cachedStatusIds.isEmpty()) {
+            DebugRepository.log("reader.refresh continuity=skip reason=no-cache pageSize=$pageSize")
             return null
         }
 
+        DebugRepository.log(
+            "reader.refresh start mode=global-time sources=${timeSources.size} pageSize=$pageSize cachedIds=${cachedStatusIds.size}",
+        )
         resetTimeStaging()
 
         val responses =
@@ -148,12 +153,22 @@ internal class MixedRemoteMediator(
             }
         }
 
+        val fetched = responses.flatMap { it.data }
         val data =
-            responses
-                .flatMap { it.data }
+            fetched
                 .distinctBy { it.accountType to it.statusKey }
                 .sortedBy(::timeSortId)
         val hasMore = responses.any { it.nextKey != null }
+        DebugRepository.log(
+            buildString {
+                append("reader.refresh done")
+                append(" fetched=${fetched.size}")
+                append(" unique=${data.size}")
+                append(" hasMore=$hasMore")
+                append(" ${data.diagnosticTimeRange()}")
+                append(" durationMs=${Clock.System.now().toEpochMilliseconds() - refreshStartedAt}")
+            },
+        )
         return PagingResult(
             data = data,
             nextKey = if (hasMore) MIXED_NEXT_KEY else null,
