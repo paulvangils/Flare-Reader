@@ -1047,6 +1047,19 @@ internal fun StatusActions(
                                 )
                             }
                         },
+                        onNumberClicked =
+                            action.onCountClicked?.let { onCountClick ->
+                                {
+                                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                    onCountClick.invoke(
+                                        ClickContext(
+                                            launcher = {
+                                                launcher.openUri(it)
+                                            },
+                                        ),
+                                    )
+                                }
+                            },
                     )
                 }
 
