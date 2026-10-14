@@ -26,12 +26,6 @@ internal sealed interface Route : NavKey {
         ) : Status
 
         @Serializable
-        data class Engagement(
-            val statusKey: MicroBlogKey,
-            val accountType: AccountType,
-        ) : Status
-
-        @Serializable
         data class VVOComment(
             val commentKey: MicroBlogKey,
             val accountType: AccountType,
@@ -697,13 +691,6 @@ internal sealed interface Route : NavKey {
 
                 is DeeplinkRoute.Status.Detail -> {
                     Status.Detail(
-                        statusKey = deeplinkRoute.statusKey,
-                        accountType = deeplinkRoute.accountType,
-                    )
-                }
-
-                is DeeplinkRoute.Status.Engagement -> {
-                    Status.Engagement(
                         statusKey = deeplinkRoute.statusKey,
                         accountType = deeplinkRoute.accountType,
                     )
