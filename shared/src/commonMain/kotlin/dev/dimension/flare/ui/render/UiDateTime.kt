@@ -20,7 +20,8 @@ public data class UiDateTime internal constructor(
     val platformValue: PlatformDateTime by lazy {
         value.toPlatform()
     }
-    val relative: String by lazy { value.relative() }
+    val relative: String
+        get() = value.relative()
     val full: String by lazy { value.full() }
     val absolute: String by lazy { value.absolute() }
 
