@@ -202,6 +202,7 @@ public fun StatusActionButton(
 internal fun StatusActionGroup(
     icon: ImageVector,
     number: UiNumber?,
+    onNumberClicked: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     color: Color = PlatformContentColor.current,
     contentDescription: String? = null,
@@ -220,6 +221,7 @@ internal fun StatusActionGroup(
             onClicked = {
                 showMenu = true
             },
+            onNumberClicked = onNumberClicked,
             color = color,
             enabled = enabled,
             withTextMinWidth = withTextMinWidth,
