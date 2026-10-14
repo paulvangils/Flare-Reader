@@ -7,6 +7,7 @@ import dev.dimension.flare.model.MicroBlogKey
 import dev.dimension.flare.ui.model.ClickEvent
 import dev.dimension.flare.ui.model.UiIcon
 import dev.dimension.flare.ui.model.UiNumber
+import dev.dimension.flare.ui.route.DeeplinkRoute
 
 public fun ActionMenu.Companion.xqtRetweet(
     statusKey: MicroBlogKey,
@@ -33,6 +34,17 @@ public fun ActionMenu.Companion.xqtRetweet(
                     accountKey = accountKey,
                 ),
             ),
+        countClickEvent =
+            if (count > 0) {
+                ClickEvent.Deeplink(
+                    DeeplinkRoute.Status.Engagement(
+                        statusKey = statusKey,
+                        accountType = dev.dimension.flare.model.AccountType.Specific(accountKey),
+                    ),
+                )
+            } else {
+                null
+            },
         actionFamily = PostActionFamily.Repost,
     )
 
