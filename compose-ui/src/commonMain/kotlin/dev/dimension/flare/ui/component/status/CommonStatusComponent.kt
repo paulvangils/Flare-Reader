@@ -116,6 +116,7 @@ import dev.dimension.flare.compose.ui.user_unblock
 import dev.dimension.flare.compose.ui.user_unmute
 import dev.dimension.flare.compose.ui.vote
 import dev.dimension.flare.data.datasource.microblog.ActionMenu
+import dev.dimension.flare.data.datasource.microblog.PostEvent
 import dev.dimension.flare.data.datasource.microblog.applyPostActionLayout
 import dev.dimension.flare.data.model.PostActionStyle
 import dev.dimension.flare.data.model.TimelineMediaLayout
@@ -153,6 +154,7 @@ import dev.dimension.flare.ui.model.UiTimelineV2
 import dev.dimension.flare.ui.model.UiTranslatableText
 import dev.dimension.flare.ui.model.onError
 import dev.dimension.flare.ui.model.onLoading
+import dev.dimension.flare.ui.model.postEventOrNull
 import dev.dimension.flare.ui.model.onSuccess
 import dev.dimension.flare.ui.render.UiRichText
 import dev.dimension.flare.ui.route.DeeplinkRoute
@@ -957,6 +959,19 @@ public fun StatusVisibilityComponent(
     }
 }
 
+private fun ActionMenu.Item.xqtEngagementUrl(): String? {
+    val retweet =
+        clickEvent
+            .postEventOrNull()
+            ?.postEvent as? PostEvent.XQT.Retweet
+            ?: return null
+    return DeeplinkRoute.Status
+        .Engagement(
+            statusKey = retweet.postKey,
+            accountType = dev.dimension.flare.model.AccountType.Specific(retweet.accountKey),
+        ).toUri()
+}
+
 @Composable
 internal fun StatusActions(
     items: ImmutableList<ActionMenu>,
@@ -1002,16 +1017,10 @@ internal fun StatusActions(
                                 action.displayItem.count != null &&
                                 index != displayItems.lastIndex,
                         onNumberClicked =
-                            action.displayItem.onCountClicked?.let { onCountClick ->
+                            action.displayItem.xqtEngagementUrl()?.let { url ->
                                 {
                                     haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                    onCountClick.invoke(
-                                        ClickContext(
-                                            launcher = {
-                                                launcher.openUri(it)
-                                            },
-                                        ),
-                                    )
+                                    launcher.openUri(url)
                                 }
                             },
                     ) { closeMenu, isMenuShown ->
@@ -1061,16 +1070,10 @@ internal fun StatusActions(
                             }
                         },
                         onNumberClicked =
-                            action.onCountClicked?.let { onCountClick ->
+                            action.xqtEngagementUrl()?.let { url ->
                                 {
                                     haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                    onCountClick.invoke(
-                                        ClickContext(
-                                            launcher = {
-                                                launcher.openUri(it)
-                                            },
-                                        ),
-                                    )
+                                    launcher.openUri(url)
                                 }
                             },
                     )
