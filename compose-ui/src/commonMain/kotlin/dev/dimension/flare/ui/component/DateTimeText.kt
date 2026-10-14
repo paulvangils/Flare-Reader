@@ -2,6 +2,11 @@ package dev.dimension.flare.ui.component
 
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextLayoutResult
@@ -18,6 +23,7 @@ import dev.dimension.flare.ui.component.platform.PlatformTextStyle
 import dev.dimension.flare.ui.render.UiDateTime
 import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.coroutines.delay
 
 @Composable
 public fun DateTimeText(
@@ -42,6 +48,18 @@ public fun DateTimeText(
     fullTime: Boolean = false,
 ) {
     val appearanceSettings = LocalTimelineAppearance.current
+    val showRelativeTime = !appearanceSettings.absoluteTimestamp && !fullTime
+    var relativeTimeTick by remember(data.value) { mutableIntStateOf(0) }
+
+    LaunchedEffect(data.value, showRelativeTime) {
+        if (showRelativeTime) {
+            while (true) {
+                delay(60_000L)
+                relativeTimeTick += 1
+            }
+        }
+    }
+
     PlatformText(
         text =
             if (appearanceSettings.absoluteTimestamp) {
@@ -49,6 +67,7 @@ public fun DateTimeText(
             } else if (fullTime) {
                 data.full
             } else {
+                relativeTimeTick
                 data.relative
             },
         modifier = modifier,
