@@ -207,6 +207,14 @@ internal fun SearchScreen(
                             }
                         }
                     }
+                    if (initialQuery.startsWith("quoted_tweet_id:")) {
+                        item(span = StaggeredGridItemSpan.FullLine) {
+                            Text(
+                                text = "Geciteerde retweets",
+                                modifier = Modifier.padding(vertical = 8.dp),
+                            )
+                        }
+                    }
                     searchContent(
                         searchUsers = state.searchState.users,
                         searchStatus = state.searchState.status,
