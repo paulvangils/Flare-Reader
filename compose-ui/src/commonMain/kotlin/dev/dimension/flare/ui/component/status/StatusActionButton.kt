@@ -54,6 +54,7 @@ public fun StatusActionButton(
     icon: ImageVector,
     number: UiNumber?,
     onClicked: () -> Unit,
+    onNumberClicked: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     color: Color = PlatformContentColor.current,
     contentDescription: String? = null,
@@ -186,7 +187,7 @@ public fun StatusActionButton(
                         Modifier
                             .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
                             .clickable(
-                                onClick = onClicked,
+                                onClick = onNumberClicked ?: onClicked,
                                 enabled = enabled,
                                 interactionSource = interactionSource,
                                 indication = null,
