@@ -106,6 +106,7 @@ public sealed class ActionMenu {
         val count: UiNumber? = null,
         val color: Color? = null,
         public val clickEvent: ClickEvent = ClickEvent.Noop,
+        public val countClickEvent: ClickEvent? = null,
         val actionFamily: PostActionFamily? = null,
         val enabled: Boolean = true,
     ) : ActionMenu() {
@@ -117,6 +118,10 @@ public sealed class ActionMenu {
 
         val onClicked: ClickContext.() -> Unit by lazy {
             clickEvent.onClicked
+        }
+
+        val onCountClicked: (ClickContext.() -> Unit)? by lazy {
+            countClickEvent?.onClicked
         }
 
         @Serializable
