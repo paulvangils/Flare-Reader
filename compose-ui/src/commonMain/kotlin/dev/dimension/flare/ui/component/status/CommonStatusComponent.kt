@@ -1001,6 +1001,19 @@ internal fun StatusActions(
                             appearanceSettings.postActionFixedWidth &&
                                 action.displayItem.count != null &&
                                 index != displayItems.lastIndex,
+                        onNumberClicked =
+                            action.displayItem.onCountClicked?.let { onCountClick ->
+                                {
+                                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                    onCountClick.invoke(
+                                        ClickContext(
+                                            launcher = {
+                                                launcher.openUri(it)
+                                            },
+                                        ),
+                                    )
+                                }
+                            },
                     ) { closeMenu, isMenuShown ->
                         action.actions.fastForEach { subActions ->
                             when (subActions) {
