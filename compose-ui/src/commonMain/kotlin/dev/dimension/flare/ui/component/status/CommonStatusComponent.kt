@@ -959,18 +959,20 @@ public fun StatusVisibilityComponent(
     }
 }
 
-private fun ActionMenu.Item.xqtEngagementUrl(): String? {
-    val retweet =
-        clickEvent
-            .postEventOrNull()
-            ?.postEvent as? PostEvent.XQT.Retweet
-            ?: return null
-    return DeeplinkRoute.Status
-        .Engagement(
-            statusKey = retweet.postKey,
-            accountType = dev.dimension.flare.model.AccountType.Specific(retweet.accountKey),
+private fun ActionMenu.Item.xqtRetweetEventOrNull(): PostEvent.XQT.Retweet? =
+    clickEvent
+        .postEventOrNull()
+        ?.postEvent as? PostEvent.XQT.Retweet
+
+private fun PostEvent.XQT.Retweet.retweetersUrl(): String =
+    "https://${postKey.host}/i/status/${postKey.id}/retweets"
+
+private fun PostEvent.XQT.Retweet.quotesUrl(): String =
+    DeeplinkRoute
+        .Search(
+            accountType = dev.dimension.flare.model.AccountType.Specific(accountKey),
+            query = "quoted_tweet_id:${postKey.id}",
         ).toUri()
-}
 
 @Composable
 internal fun StatusActions(
@@ -1001,6 +1003,7 @@ internal fun StatusActions(
             }
             when (action) {
                 is ActionMenu.Group -> {
+                    val xqtRetweet = action.displayItem.xqtRetweetEventOrNull()
                     StatusActionGroup(
                         icon =
                             action.displayItem.icon?.toImageVector()
@@ -1017,10 +1020,10 @@ internal fun StatusActions(
                                 action.displayItem.count != null &&
                                 index != displayItems.lastIndex,
                         onNumberClicked =
-                            action.displayItem.xqtEngagementUrl()?.let { url ->
+                            xqtRetweet?.let { retweet ->
                                 {
                                     haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                    launcher.openUri(url)
+                                    launcher.openUri(retweet.retweetersUrl())
                                 }
                             },
                     ) { closeMenu, isMenuShown ->
@@ -1037,6 +1040,27 @@ internal fun StatusActions(
                                     PlatformDropdownMenuDivider()
                                 }
                             }
+                        }
+                        if (xqtRetweet != null) {
+                            PlatformDropdownMenuDivider()
+                            PlatformDropdownMenuItem(
+                                text = {
+                                    PlatformText("Reposts bekijken")
+                                },
+                                onClick = {
+                                    closeMenu()
+                                    launcher.openUri(xqtRetweet.retweetersUrl())
+                                },
+                            )
+                            PlatformDropdownMenuItem(
+                                text = {
+                                    PlatformText("Geciteerde reposts")
+                                },
+                                onClick = {
+                                    closeMenu()
+                                    launcher.openUri(xqtRetweet.quotesUrl())
+                                },
+                            )
                         }
                     }
                 }
@@ -1070,10 +1094,10 @@ internal fun StatusActions(
                             }
                         },
                         onNumberClicked =
-                            action.xqtEngagementUrl()?.let { url ->
+                            action.xqtRetweetEventOrNull()?.let { retweet ->
                                 {
                                     haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                    launcher.openUri(url)
+                                    launcher.openUri(retweet.retweetersUrl())
                                 }
                             },
                     )
