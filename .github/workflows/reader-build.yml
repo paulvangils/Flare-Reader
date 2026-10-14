@@ -6,6 +6,7 @@ on:
     branches:
       - reader-v1
       - reader-v3
+      - reader-v3.7-work
 
 permissions:
   contents: read
