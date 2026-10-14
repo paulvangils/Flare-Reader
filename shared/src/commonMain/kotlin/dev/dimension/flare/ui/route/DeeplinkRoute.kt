@@ -40,6 +40,12 @@ public sealed class DeeplinkRoute {
         ) : Status()
 
         @Serializable
+        public data class Engagement(
+            val statusKey: MicroBlogKey,
+            val accountType: AccountType,
+        ) : Status()
+
+        @Serializable
         public data class VVOComment(
             val commentKey: MicroBlogKey,
             val accountType: AccountType,
