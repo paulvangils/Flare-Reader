@@ -1019,13 +1019,7 @@ internal fun StatusActions(
                             appearanceSettings.postActionFixedWidth &&
                                 action.displayItem.count != null &&
                                 index != displayItems.lastIndex,
-                        onNumberClicked =
-                            xqtRetweet?.let { retweet ->
-                                {
-                                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                    launcher.openUri(retweet.retweetersUrl())
-                                }
-                            },
+                        numberOpensMenu = xqtRetweet != null,
                     ) { closeMenu, isMenuShown ->
                         action.actions.fastForEach { subActions ->
                             when (subActions) {
