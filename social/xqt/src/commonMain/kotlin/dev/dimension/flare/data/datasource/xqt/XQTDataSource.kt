@@ -16,6 +16,7 @@ import dev.dimension.flare.data.datasource.microblog.NotificationFilter
 import dev.dimension.flare.data.datasource.microblog.NotificationTimelineDataSource
 import dev.dimension.flare.data.datasource.microblog.PostEvent
 import dev.dimension.flare.data.datasource.microblog.ProfileTab
+import dev.dimension.flare.data.datasource.microblog.RetweetersDataSource
 import dev.dimension.flare.data.datasource.microblog.datasource.ArticleDataSource
 import dev.dimension.flare.data.datasource.microblog.datasource.ListDataSource
 import dev.dimension.flare.data.datasource.microblog.datasource.NotificationDataSource
@@ -34,6 +35,7 @@ import dev.dimension.flare.data.datasource.microblog.handler.PostHandler
 import dev.dimension.flare.data.datasource.microblog.handler.RelationHandler
 import dev.dimension.flare.data.datasource.microblog.handler.UserHandler
 import dev.dimension.flare.data.datasource.microblog.paging.RemoteLoader
+import dev.dimension.flare.data.datasource.microblog.paging.PagingResult
 import dev.dimension.flare.data.datasource.microblog.paging.notSupported
 import dev.dimension.flare.data.model.IconType
 import dev.dimension.flare.data.model.tab.ShortcutSpec
@@ -72,6 +74,7 @@ import dev.dimension.flare.ui.model.UiArticle
 import dev.dimension.flare.ui.model.UiIcon
 import dev.dimension.flare.ui.model.UiList
 import dev.dimension.flare.ui.model.UiPodcast
+import dev.dimension.flare.ui.model.UiProfile
 import dev.dimension.flare.ui.model.UiStrings
 import dev.dimension.flare.ui.model.UiText
 import dev.dimension.flare.ui.model.UiTimelineV2
@@ -122,6 +125,7 @@ internal class XQTDataSource(
     TimelineTabConfigurationDataSource,
     DirectMessageDataSource,
     RelationDataSource,
+    RetweetersDataSource,
     PostEventHandler.Handler {
     private val coroutineScope: CoroutineScope by koinInject()
     private val imageCompressor: ImageCompressor by koinInject()
@@ -162,6 +166,9 @@ internal class XQTDataSource(
             coroutineScope = coroutineScope,
         )
     }
+
+    override suspend fun loadRetweeters(tweetId: String, cursor: String?): PagingResult<UiProfile> =
+        service.loadReaderRetweeters(accountKey = accountKey, tweetId = tweetId, cursor = cursor)
 
     internal suspend fun getTweetResultByRestId(tweetId: String): TweetUnion? =
         service
