@@ -96,6 +96,13 @@ internal fun SearchScreen(
     )
     FlareScaffold(
         topBar = {
+            if (initialQuery.startsWith("quoted_tweet_id:")) {
+                Text(
+                    text = "Geciteerde retweets",
+                    style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(16.dp),
+                )
+            } else {
             Box(
                 modifier =
                     Modifier
@@ -186,6 +193,7 @@ internal fun SearchScreen(
                         },
                 )
             }
+            }
         },
     ) { contentPadding ->
         RefreshContainer(
@@ -238,10 +246,6 @@ internal fun SearchScreen(
                             .takeIf { initialQuery.startsWith("quoted_tweet_id:") && it.isNotBlank() }
                     if (quotedTweetId != null) {
                         item(span = StaggeredGridItemSpan.FullLine) {
-                            Text(
-                                text = "Geciteerde retweets",
-                                modifier = Modifier.padding(vertical = 8.dp),
-                            )
                             OriginalTweetPreview(
                                 accountType = accountType,
                                 tweetId = quotedTweetId,
