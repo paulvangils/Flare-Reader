@@ -62,7 +62,7 @@ jobs:
           EOF
 
       - name: Run reader regression tests
-        run: ./gradlew :shared:jvmTest :compose-ui:jvmTest --info --stacktrace
+        run: ./gradlew :shared:jvmTest :compose-ui:jvmTest :app:testDebugUnitTest --info --stacktrace
 
       - name: Upload test reports on failure
         if: failure()
