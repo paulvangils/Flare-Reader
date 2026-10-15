@@ -1134,6 +1134,11 @@ internal fun StatusActions(
                                     haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
                                     launcher.openUri(retweet.retweetersUrl())
                                 }
+                            } ?: action.blueskyReblogEventOrNull()?.let { repost ->
+                                {
+                                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                    launcher.openUri(repost.originalPostUrl())
+                                }
                             },
                     )
                 }
