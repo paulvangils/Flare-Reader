@@ -116,6 +116,7 @@ import dev.dimension.flare.compose.ui.user_unblock
 import dev.dimension.flare.compose.ui.user_unmute
 import dev.dimension.flare.compose.ui.vote
 import dev.dimension.flare.data.datasource.microblog.ActionMenu
+import dev.dimension.flare.data.datasource.microblog.PostActionFamily
 import dev.dimension.flare.data.datasource.microblog.PostEvent
 import dev.dimension.flare.data.datasource.microblog.applyPostActionLayout
 import dev.dimension.flare.data.model.PostActionStyle
@@ -1036,6 +1037,10 @@ internal fun StatusActions(
             when (action) {
                 is ActionMenu.Group -> {
                     val xqtRetweet = action.displayItem.xqtRetweetEventOrNull()
+                    val quoteCount = action.actions
+                        .filterIsInstance<ActionMenu.Item>()
+                        .firstOrNull { it.actionFamily == PostActionFamily.Quote }
+                        ?.count?.value
                     val blueskyReblog = action.displayItem.blueskyReblogEventOrNull()
                     StatusActionGroup(
                         icon =
@@ -1096,7 +1101,7 @@ internal fun StatusActions(
                             PlatformDropdownMenuDivider()
                             PlatformDropdownMenuItem(
                                 text = {
-                                    PlatformText("Retweets bekijken")
+                                    PlatformText("Retweets bekijken (${xqtRetweet.count})")
                                 },
                                 onClick = {
                                     closeMenu()
@@ -1114,7 +1119,9 @@ internal fun StatusActions(
                             )
                             PlatformDropdownMenuItem(
                                 text = {
-                                    PlatformText("Geciteerde retweets")
+                                    PlatformText(
+                                        "Geciteerde retweets" + (quoteCount?.let { " ($it)" } ?: "")
+                                    )
                                 },
                                 onClick = {
                                     closeMenu()
