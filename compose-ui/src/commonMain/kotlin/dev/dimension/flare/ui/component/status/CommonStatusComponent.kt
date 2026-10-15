@@ -969,6 +969,13 @@ private fun ActionMenu.Item.blueskyReblogEventOrNull(): PostEvent.Bluesky.Reblog
         .postEventOrNull()
         ?.postEvent as? PostEvent.Bluesky.Reblog
 
+private fun PostEvent.Bluesky.Reblog.engagementUrl(kind: String): String =
+    DeeplinkRoute
+        .Search(
+            accountType = dev.dimension.flare.model.AccountType.Specific(accountKey),
+            query = "__reader_bluesky_engagement__${kind}:${uri}",
+        ).toUri()
+
 private fun PostEvent.Bluesky.Reblog.originalPostUrl(): String =
     DeeplinkRoute
         .Status
@@ -1060,6 +1067,20 @@ internal fun StatusActions(
                         if (blueskyReblog != null) {
                             PlatformDropdownMenuDivider()
                             PlatformDropdownMenuItem(
+                                text = { PlatformText("Retweets bekijken") },
+                                onClick = {
+                                    closeMenu()
+                                    launcher.openUri(blueskyReblog.engagementUrl("reposts"))
+                                },
+                            )
+                            PlatformDropdownMenuItem(
+                                text = { PlatformText("Geciteerde berichten") },
+                                onClick = {
+                                    closeMenu()
+                                    launcher.openUri(blueskyReblog.engagementUrl("quotes"))
+                                },
+                            )
+                            PlatformDropdownMenuItem(
                                 text = { PlatformText("Oorspronkelijke Bluesky-post bekijken") },
                                 onClick = {
                                     closeMenu()
@@ -1137,7 +1158,7 @@ internal fun StatusActions(
                             } ?: action.blueskyReblogEventOrNull()?.let { repost ->
                                 {
                                     haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                    launcher.openUri(repost.originalPostUrl())
+                                    launcher.openUri(repost.engagementUrl("reposts"))
                                 }
                             },
                     )
