@@ -12,6 +12,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -21,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import compose.icons.FontAwesomeIcons
 import compose.icons.fontawesomeicons.Solid
@@ -44,6 +46,8 @@ import dev.dimension.flare.ui.component.status.LazyStatusVerticalStaggeredGrid
 import dev.dimension.flare.ui.model.onSuccess
 import dev.dimension.flare.ui.presenter.home.SearchPresenter
 import dev.dimension.flare.ui.presenter.invoke
+import dev.dimension.flare.ui.route.DeeplinkRoute
+import dev.dimension.flare.ui.route.toUri
 import moe.tlaster.precompose.molecule.producePresenter
 
 @Composable
@@ -62,6 +66,7 @@ internal fun SearchScreen(
     val lazyListState = rememberLazyStaggeredGridState()
     val isBigScreen = isBigScreen()
     val showAskAi = LocalTimelineAppearance.current.aiConfig.agent
+    val uriHandler = LocalUriHandler.current
     RegisterTabCallback(
         lazyListState = lazyListState,
         onRefresh = {
@@ -207,12 +212,30 @@ internal fun SearchScreen(
                             }
                         }
                     }
-                    if (initialQuery.startsWith("quoted_tweet_id:")) {
+                    val quotedTweetId =
+                        initialQuery.removePrefix("quoted_tweet_id:")
+                            .takeIf { initialQuery.startsWith("quoted_tweet_id:") && it.isNotBlank() }
+                    if (quotedTweetId != null) {
                         item(span = StaggeredGridItemSpan.FullLine) {
                             Text(
                                 text = "Geciteerde retweets",
                                 modifier = Modifier.padding(vertical = 8.dp),
                             )
+                            val host = (accountType as? AccountType.Specific)?.accountKey?.host
+                            if (host != null) {
+                                TextButton(
+                                    onClick = {
+                                        uriHandler.openUri(
+                                            DeeplinkRoute.Status.Detail(
+                                                statusKey = MicroBlogKey(quotedTweetId, host),
+                                                accountType = accountType,
+                                            ).toUri(),
+                                        )
+                                    },
+                                ) {
+                                    Text("Oorspronkelijke tweet bekijken")
+                                }
+                            }
                         }
                     }
                     searchContent(
