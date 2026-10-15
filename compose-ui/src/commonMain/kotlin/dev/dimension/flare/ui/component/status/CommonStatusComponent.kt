@@ -1041,7 +1041,7 @@ internal fun StatusActions(
                             appearanceSettings.postActionFixedWidth &&
                                 action.displayItem.count != null &&
                                 index != displayItems.lastIndex,
-                        numberOpensMenu = xqtRetweet != null,
+                        numberOpensMenu = xqtRetweet != null || blueskyReblog != null,
                     ) { closeMenu, isMenuShown ->
                         action.actions.fastForEach { subActions ->
                             when (subActions) {
