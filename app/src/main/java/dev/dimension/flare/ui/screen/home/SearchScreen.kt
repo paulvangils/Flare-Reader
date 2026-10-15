@@ -45,6 +45,8 @@ import dev.dimension.flare.ui.component.searchContent
 import dev.dimension.flare.ui.component.status.LazyStatusVerticalStaggeredGrid
 import dev.dimension.flare.ui.model.onSuccess
 import dev.dimension.flare.ui.presenter.home.SearchPresenter
+import dev.dimension.flare.ui.presenter.status.StatusContextPresenter
+import dev.dimension.flare.ui.model.UiTimelineV2
 import dev.dimension.flare.ui.presenter.invoke
 import dev.dimension.flare.ui.route.DeeplinkRoute
 import dev.dimension.flare.ui.route.toUri
@@ -240,6 +242,10 @@ internal fun SearchScreen(
                                 text = "Geciteerde retweets",
                                 modifier = Modifier.padding(vertical = 8.dp),
                             )
+                            OriginalTweetPreview(
+                                accountType = accountType,
+                                tweetId = quotedTweetId,
+                            )
                             val host = (accountType as? AccountType.Specific)?.accountKey?.host
                             if (host != null) {
                                 TextButton(
@@ -298,6 +304,41 @@ private fun presenter(
             searchBarState.setQuery(new)
             searchBarState.addSearchHistory(new)
             searchState.search(new)
+        }
+    }
+}
+
+@Composable
+private fun OriginalTweetPreview(
+    accountType: AccountType,
+    tweetId: String,
+) {
+    val host = (accountType as? AccountType.Specific)?.accountKey?.host ?: return
+    val statusKey = remember(tweetId, host) { MicroBlogKey(tweetId, host) }
+    val source by producePresenter("reader_quote_source_${accountType}_$tweetId") {
+        remember(accountType, statusKey) {
+            StatusContextPresenter(accountType = accountType, statusKey = statusKey)
+        }.invoke()
+    }
+    source.current.onSuccess { timeline ->
+        val post = when (timeline) {
+            is UiTimelineV2.Post -> timeline
+            is UiTimelineV2.TimelinePostItem -> timeline.displayPost
+            else -> null
+        }
+        if (post != null) {
+            androidx.compose.foundation.layout.Column(
+                modifier = Modifier.padding(vertical = 8.dp),
+            ) {
+                Text(
+                    text = post.user?.name?.raw.orEmpty(),
+                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = post.content.original.raw,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                )
+            }
         }
     }
 }
