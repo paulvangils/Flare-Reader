@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -32,6 +33,7 @@ import dev.dimension.flare.ui.route.toUri
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.bodyAsText
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -113,8 +115,37 @@ internal fun BlueskyEngagementScreen(
     var loading by remember(query, kind) { mutableStateOf(false) }
     var error by remember(query, kind) { mutableStateOf<String?>(null) }
     var requested by remember(query, kind) { mutableStateOf(false) }
+    var retry by remember(query, kind) { mutableIntStateOf(0) }
+    var originalText by remember(query.uri) { mutableStateOf<String?>(null) }
+    var originalAuthor by remember(query.uri) { mutableStateOf<String?>(null) }
+    var repostCount by remember(query.uri) { mutableStateOf<Long?>(null) }
+    var quoteCount by remember(query.uri) { mutableStateOf<Long?>(null) }
 
-    LaunchedEffect(query.uri, kind, cursor) {
+    LaunchedEffect(query.uri) {
+        val client = ktorClient()
+        try {
+            val response = client.get("https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts") {
+                parameter("uris", query.uri)
+            }
+            if (response.status.value in 200..299) {
+                val post = Json.parseToJsonElement(response.bodyAsText())
+                    .jsonObject["posts"]?.jsonArray?.firstOrNull()?.jsonObject
+                originalText = post?.get("record")?.jsonObject?.string("text")
+                originalAuthor = post?.get("author")?.jsonObject?.string("displayName")
+                    ?: post?.get("author")?.jsonObject?.string("handle")
+                repostCount = post?.get("repostCount")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                quoteCount = post?.get("quoteCount")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // The engagement list remains usable when original-post metadata cannot be fetched.
+        } finally {
+            client.close()
+        }
+    }
+
+    LaunchedEffect(query.uri, kind, cursor, retry) {
         loading = true
         error = null
         try {
@@ -140,6 +171,8 @@ internal fun BlueskyEngagementScreen(
             } finally {
                 client.close()
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (exception: Exception) {
             error = "Ophalen mislukt: ${exception.message ?: "onbekende fout"}"
         } finally {
@@ -159,10 +192,19 @@ internal fun BlueskyEngagementScreen(
             modifier = Modifier.padding(horizontal = 12.dp),
         ) {
             Button(onClick = { kind = "reposts" }, enabled = kind != "reposts") {
-                Text("Retweets")
+                Text("Retweets" + (repostCount?.let { " ($it)" } ?: ""))
             }
             Button(onClick = { kind = "quotes" }, enabled = kind != "quotes") {
-                Text("Citaten")
+                Text("Citaten" + (quoteCount?.let { " ($it)" } ?: ""))
+            }
+        }
+        if (originalText != null) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text("Oorspronkelijke post", style = MaterialTheme.typography.titleMedium)
+                if (!originalAuthor.isNullOrBlank()) {
+                    Text(originalAuthor.orEmpty(), style = MaterialTheme.typography.bodySmall)
+                }
+                Text(originalText.orEmpty(), style = MaterialTheme.typography.bodyMedium)
             }
         }
         if (host != null) {
@@ -218,10 +260,8 @@ internal fun BlueskyEngagementScreen(
                         Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
                         TextButton(
                             onClick = {
-                                // Re-trigger on failure, preserving the first page.
-                                requested = false
-                                cursor = null
-                                items = emptyList()
+                                // Retry the current page without changing the timeline or cache.
+                                retry++
                             },
                         ) { Text("Opnieuw proberen") }
                     }
