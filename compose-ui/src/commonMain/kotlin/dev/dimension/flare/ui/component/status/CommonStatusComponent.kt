@@ -1039,7 +1039,7 @@ internal fun StatusActions(
                             PlatformDropdownMenuDivider()
                             PlatformDropdownMenuItem(
                                 text = {
-                                    PlatformText("Reposts bekijken")
+                                    PlatformText("Retweets bekijken")
                                 },
                                 onClick = {
                                     closeMenu()
@@ -1048,7 +1048,7 @@ internal fun StatusActions(
                             )
                             PlatformDropdownMenuItem(
                                 text = {
-                                    PlatformText("Geciteerde reposts")
+                                    PlatformText("Geciteerde retweets")
                                 },
                                 onClick = {
                                     closeMenu()
