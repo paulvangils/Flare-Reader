@@ -985,7 +985,11 @@ private fun PostEvent.Bluesky.Reblog.originalPostUrl(): String =
         ).toUri()
 
 private fun PostEvent.XQT.Retweet.retweetersUrl(): String =
-    "https://${postKey.host}/i/status/${postKey.id}/retweets"
+    DeeplinkRoute
+        .Search(
+            accountType = dev.dimension.flare.model.AccountType.Specific(accountKey),
+            query = "__reader_twitter_retweeters__${postKey.id}",
+        ).toUri()
 
 private fun PostEvent.XQT.Retweet.originalTweetUrl(): String =
     DeeplinkRoute
