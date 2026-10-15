@@ -57,6 +57,17 @@ internal fun SearchScreen(
     onUserClick: (AccountType, MicroBlogKey) -> Unit,
     onAskAiClick: (String?) -> Unit,
 ) {
+    val blueskyEngagement = remember(initialQuery) {
+        BlueskyEngagementQuery.fromSearchQuery(initialQuery)
+    }
+    if (blueskyEngagement != null) {
+        BlueskyEngagementScreen(
+            accountType = accountType,
+            query = blueskyEngagement,
+            onUserClick = onUserClick,
+        )
+        return
+    }
     val state by producePresenter("search_${accountType}_$initialQuery") {
         presenter(
             accountType,
