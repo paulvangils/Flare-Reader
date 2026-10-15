@@ -25,22 +25,14 @@ internal suspend fun XQTService.loadReaderRetweeters(
     cursor: String?,
 ): PagingResult<UiProfile> {
     val variables = RetweetersVariables(tweetId = tweetId, cursor = cursor).encodeJson()
-    // The web GraphQL query id changes periodically. Try a newer independently
-    // verified operation id first, then the generated client's existing fallback.
-    val candidateIds = listOf("FeoLYPQ-q4bmjGLTZTGs0g", "TZsWuSj7vGmncVnq7KWDUQ")
-    var lastError: Exception? = null
-    for (queryId in candidateIds) {
-        try {
-            val response = getRetweeters(pathQueryId = queryId, variables = variables).body()
-                ?: error("Twitter gaf geen geldige retweetersgegevens terug")
-            val instructions = response.data.retweetersTimeline.timeline.instructions
-            return PagingResult(
-                data = instructions.users().map { it.render(accountKey = accountKey) },
-                nextKey = instructions.cursor(),
-            )
-        } catch (exception: Exception) {
-            lastError = exception
-        }
-    }
-    throw lastError ?: IllegalStateException("Twitter-retweeters konden niet worden opgehaald")
+    // Use the operation declared by the generated, authenticated UserListApi.
+    // A changing Twitter GraphQL query identifier may still cause a recoverable
+    // service error; do not silently claim an empty retweeter list in that case.
+    val response = getRetweeters(variables = variables).body()
+        ?: error("Twitter gaf geen geldige retweetersgegevens terug")
+    val instructions = response.data.retweetersTimeline.timeline.instructions
+    return PagingResult(
+        data = instructions.users().map { it.render(accountKey = accountKey) },
+        nextKey = instructions.cursor(),
+    )
 }
