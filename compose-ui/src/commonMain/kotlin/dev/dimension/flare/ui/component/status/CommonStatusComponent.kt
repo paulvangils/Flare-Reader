@@ -967,6 +967,14 @@ private fun ActionMenu.Item.xqtRetweetEventOrNull(): PostEvent.XQT.Retweet? =
 private fun PostEvent.XQT.Retweet.retweetersUrl(): String =
     "https://${postKey.host}/i/status/${postKey.id}/retweets"
 
+private fun PostEvent.XQT.Retweet.originalTweetUrl(): String =
+    DeeplinkRoute
+        .Status
+        .Detail(
+            statusKey = postKey,
+            accountType = dev.dimension.flare.model.AccountType.Specific(accountKey),
+        ).toUri()
+
 private fun PostEvent.XQT.Retweet.quotesUrl(): String =
     DeeplinkRoute
         .Search(
@@ -1044,6 +1052,15 @@ internal fun StatusActions(
                                 onClick = {
                                     closeMenu()
                                     launcher.openUri(xqtRetweet.retweetersUrl())
+                                },
+                            )
+                            PlatformDropdownMenuItem(
+                                text = {
+                                    PlatformText("Oorspronkelijke tweet bekijken")
+                                },
+                                onClick = {
+                                    closeMenu()
+                                    launcher.openUri(xqtRetweet.originalTweetUrl())
                                 },
                             )
                             PlatformDropdownMenuItem(
