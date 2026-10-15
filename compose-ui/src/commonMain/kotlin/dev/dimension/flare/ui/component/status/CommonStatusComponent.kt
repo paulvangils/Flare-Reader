@@ -964,6 +964,19 @@ private fun ActionMenu.Item.xqtRetweetEventOrNull(): PostEvent.XQT.Retweet? =
         .postEventOrNull()
         ?.postEvent as? PostEvent.XQT.Retweet
 
+private fun ActionMenu.Item.blueskyReblogEventOrNull(): PostEvent.Bluesky.Reblog? =
+    clickEvent
+        .postEventOrNull()
+        ?.postEvent as? PostEvent.Bluesky.Reblog
+
+private fun PostEvent.Bluesky.Reblog.originalPostUrl(): String =
+    DeeplinkRoute
+        .Status
+        .Detail(
+            statusKey = postKey,
+            accountType = dev.dimension.flare.model.AccountType.Specific(accountKey),
+        ).toUri()
+
 private fun PostEvent.XQT.Retweet.retweetersUrl(): String =
     "https://${postKey.host}/i/status/${postKey.id}/retweets"
 
@@ -1012,6 +1025,7 @@ internal fun StatusActions(
             when (action) {
                 is ActionMenu.Group -> {
                     val xqtRetweet = action.displayItem.xqtRetweetEventOrNull()
+                    val blueskyReblog = action.displayItem.blueskyReblogEventOrNull()
                     StatusActionGroup(
                         icon =
                             action.displayItem.icon?.toImageVector()
@@ -1042,6 +1056,16 @@ internal fun StatusActions(
                                     PlatformDropdownMenuDivider()
                                 }
                             }
+                        }
+                        if (blueskyReblog != null) {
+                            PlatformDropdownMenuDivider()
+                            PlatformDropdownMenuItem(
+                                text = { PlatformText("Oorspronkelijke Bluesky-post bekijken") },
+                                onClick = {
+                                    closeMenu()
+                                    launcher.openUri(blueskyReblog.originalPostUrl())
+                                },
+                            )
                         }
                         if (xqtRetweet != null) {
                             PlatformDropdownMenuDivider()
