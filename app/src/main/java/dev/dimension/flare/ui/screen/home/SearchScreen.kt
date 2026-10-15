@@ -57,6 +57,14 @@ internal fun SearchScreen(
     onUserClick: (AccountType, MicroBlogKey) -> Unit,
     onAskAiClick: (String?) -> Unit,
 ) {
+    if (initialQuery.startsWith(TWITTER_RETWEETERS_QUERY_PREFIX)) {
+        TwitterRetweetersScreen(
+            accountType = accountType,
+            tweetId = initialQuery.removePrefix(TWITTER_RETWEETERS_QUERY_PREFIX),
+            onUserClick = onUserClick,
+        )
+        return
+    }
     val blueskyEngagement = remember(initialQuery) {
         BlueskyEngagementQuery.fromSearchQuery(initialQuery)
     }
