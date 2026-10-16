@@ -1,6 +1,10 @@
 package dev.dimension.flare.ui.screen.home
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import dev.dimension.flare.ui.component.NetworkImage
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -67,6 +71,7 @@ private data class EngagementItem(
     val did: String,
     val handle: String,
     val displayName: String,
+    val avatar: String? = null,
     val postUri: String? = null,
     val text: String? = null,
 )
@@ -93,6 +98,7 @@ private fun parseEngagementPage(json: String, kind: String): EngagementPage {
             did = did,
             handle = handle,
             displayName = displayName,
+            avatar = profile.string("avatar"),
             postUri = if (kind == "quotes") entry.string("uri") else null,
             text = if (kind == "quotes") record?.string("text") else null,
         )
@@ -224,7 +230,7 @@ internal fun BlueskyEngagementScreen(
         HorizontalDivider()
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(items, key = { item -> item.postUri ?: item.did }) { item ->
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
@@ -240,11 +246,19 @@ internal fun BlueskyEngagementScreen(
                             }
                         }
                         .padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text(item.displayName, style = MaterialTheme.typography.titleMedium)
-                    Text("@${item.handle}", style = MaterialTheme.typography.bodySmall)
-                    if (!item.text.isNullOrBlank()) {
-                        Text(item.text, modifier = Modifier.padding(top = 8.dp))
+                    NetworkImage(
+                        model = item.avatar,
+                        contentDescription = null,
+                        modifier = Modifier.size(44.dp).clip(CircleShape),
+                    )
+                    Column {
+                        Text(item.displayName, style = MaterialTheme.typography.titleMedium)
+                        Text("@${item.handle}", style = MaterialTheme.typography.bodySmall)
+                        if (!item.text.isNullOrBlank()) {
+                            Text(item.text, modifier = Modifier.padding(top = 8.dp))
+                        }
                     }
                 }
                 HorizontalDivider()
