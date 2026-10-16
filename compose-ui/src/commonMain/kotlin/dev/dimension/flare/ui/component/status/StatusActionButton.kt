@@ -203,6 +203,7 @@ internal fun StatusActionGroup(
     icon: ImageVector,
     number: UiNumber?,
     numberOpensMenu: Boolean = false,
+    onNumberClicked: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     color: Color = PlatformContentColor.current,
     contentDescription: String? = null,
@@ -222,7 +223,7 @@ internal fun StatusActionGroup(
                 showMenu = true
             },
             onNumberClicked =
-                if (numberOpensMenu) {
+                onNumberClicked ?: if (numberOpensMenu) {
                     { showMenu = true }
                 } else {
                     null
