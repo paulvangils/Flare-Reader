@@ -1041,7 +1041,10 @@ internal fun StatusActions(
                         .filterIsInstance<ActionMenu.Item>()
                         .firstOrNull { it.actionFamily == PostActionFamily.Quote }
                         ?.count?.value
+                    // The visible repost button is a display-only item; its PostEvent lives in a sub-action.
                     val blueskyReblog = action.displayItem.blueskyReblogEventOrNull()
+                        ?: action.actions.filterIsInstance<ActionMenu.Item>()
+                            .firstNotNullOfOrNull { it.blueskyReblogEventOrNull() }
                     StatusActionGroup(
                         icon =
                             action.displayItem.icon?.toImageVector()
@@ -1057,7 +1060,13 @@ internal fun StatusActions(
                             appearanceSettings.postActionFixedWidth &&
                                 action.displayItem.count != null &&
                                 index != displayItems.lastIndex,
-                        numberOpensMenu = xqtRetweet != null || blueskyReblog != null,
+                        numberOpensMenu = xqtRetweet != null,
+                        onNumberClicked = blueskyReblog?.let { repost ->
+                            {
+                                haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                launcher.openUri(repost.engagementUrl("reposts"))
+                            }
+                        },
                     ) { closeMenu, isMenuShown ->
                         action.actions.fastForEach { subActions ->
                             when (subActions) {
@@ -1076,14 +1085,14 @@ internal fun StatusActions(
                         if (blueskyReblog != null) {
                             PlatformDropdownMenuDivider()
                             PlatformDropdownMenuItem(
-                                text = { PlatformText("Retweets bekijken") },
+                                text = { PlatformText("Retweets bekijken (${blueskyReblog.count})") },
                                 onClick = {
                                     closeMenu()
                                     launcher.openUri(blueskyReblog.engagementUrl("reposts"))
                                 },
                             )
                             PlatformDropdownMenuItem(
-                                text = { PlatformText("Geciteerde berichten") },
+                                text = { PlatformText("Geciteerde berichten" + (quoteCount?.let { " ($it)" } ?: "")) },
                                 onClick = {
                                     closeMenu()
                                     launcher.openUri(blueskyReblog.engagementUrl("quotes"))
