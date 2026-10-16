@@ -1,6 +1,10 @@
 package dev.dimension.flare.ui.screen.home
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.Alignment
+import dev.dimension.flare.ui.component.AvatarComponent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -91,13 +95,18 @@ internal fun TwitterRetweetersScreen(
         HorizontalDivider()
         LazyColumn(Modifier.fillMaxSize()) {
             items(profiles, key = { it.key.toString() }) { profile ->
-                Column(
+                Row(
                     modifier = Modifier.fillMaxWidth()
                         .clickable { onUserClick(accountType, profile.key) }
                         .padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(profile.name.raw, style = MaterialTheme.typography.titleMedium)
-                    Text(profile.handle.raw, style = MaterialTheme.typography.bodySmall)
+                    AvatarComponent(data = profile.avatar, contentDescription = null)
+                    Column {
+                        Text(profile.name.raw, style = MaterialTheme.typography.titleMedium)
+                        Text(profile.handle.raw, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
                 HorizontalDivider()
             }
