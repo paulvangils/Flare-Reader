@@ -150,6 +150,7 @@ import dev.dimension.flare.ui.model.ClickContext
 import dev.dimension.flare.ui.model.TranslationDisplayState
 import dev.dimension.flare.ui.model.UiCard
 import dev.dimension.flare.ui.model.UiMedia
+import dev.dimension.flare.ui.model.UiNumber
 import dev.dimension.flare.ui.model.UiPoll
 import dev.dimension.flare.ui.model.UiTimelineV2
 import dev.dimension.flare.ui.model.UiTranslatableText
@@ -985,6 +986,11 @@ private fun PostEvent.Bluesky.Reblog.originalPostUrl(): String =
             accountType = dev.dimension.flare.model.AccountType.Specific(accountKey),
         ).toUri()
 
+// The number beside the X repost icon includes quotes, but the retweeter list and
+// the post action's own count must continue to use only ordinary retweets.
+internal fun totalXqtRepostCount(retweets: Long, quotes: Long): Long =
+    retweets + quotes
+
 private fun PostEvent.XQT.Retweet.retweetersUrl(): String =
     DeeplinkRoute
         .Search(
@@ -1049,7 +1055,12 @@ internal fun StatusActions(
                         icon =
                             action.displayItem.icon?.toImageVector()
                                 ?: FontAwesomeIcons.Solid.Ellipsis,
-                        number = action.displayItem.count,
+                        number =
+                            if (xqtRetweet != null) {
+                                UiNumber(totalXqtRepostCount(xqtRetweet.count, quoteCount ?: 0L))
+                            } else {
+                                action.displayItem.count
+                            },
                         color =
                             action.displayItem.color?.toComposeColor()
                                 ?: PlatformContentColor.current,
