@@ -17,6 +17,10 @@ import dev.dimension.flare.common.emptyFlow
 import dev.dimension.flare.common.refreshSuspend
 import dev.dimension.flare.common.toPagingState
 import dev.dimension.flare.data.datasource.microblog.AuthenticatedMicroblogDataSource
+import dev.dimension.flare.data.datasource.microblog.SearchSortMode
+import dev.dimension.flare.data.datasource.microblog.searchStatusSorted
+import dev.dimension.flare.data.datasource.microblog.paging.RemoteLoader
+import dev.dimension.flare.data.datasource.microblog.paging.notSupported
 import dev.dimension.flare.data.datasource.microblog.datasource.UserDataSource
 import dev.dimension.flare.data.datasource.microblog.paging.toPagingSource
 import dev.dimension.flare.data.datasource.microblog.pagingConfig
@@ -41,6 +45,7 @@ import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -50,6 +55,7 @@ import kotlinx.coroutines.flow.map
 public class SearchPresenter(
     private val accountType: AccountType,
     private val initialQuery: String = "",
+    private val federatedByDefault: Boolean = false,
 ) : PresenterBase<SearchState>() {
     private val accountRepository: AccountRepository by koinInject()
 
@@ -83,17 +89,21 @@ public class SearchPresenter(
         MutableStateFlow<UiProfile?>(null)
     }
 
-    private val selectedAccountTypeFlow: Flow<AccountType> by lazy {
+    private val searchSortModeFlow = MutableStateFlow(SearchSortMode.Latest)
+
+    private val selectedAccountTypeFlow: Flow<AccountType?> by lazy {
         selectedAccountFlow.map { profile ->
-            profile?.let {
-                AccountType.Specific(it.key)
-            } ?: accountType
+            profile?.let { AccountType.Specific(it.key) }
+                ?: accountType.takeUnless { federatedByDefault }
         }
     }
 
     private val usersFlow by lazy {
         selectedAccountTypeFlow.flatMapLatest { accountType ->
-            accountServiceFlow(accountType = accountType, repository = accountRepository).flatMapLatest { dataSource ->
+            if (accountType == null) {
+                PagingData.emptyFlow(isError = false)
+            } else {
+                accountServiceFlow(accountType = accountType, repository = accountRepository).flatMapLatest { dataSource ->
                 queryFlow.flatMapLatest { query ->
                     runCatching {
                         if (query.isEmpty()) {
@@ -106,17 +116,43 @@ public class SearchPresenter(
                     }.getOrElse { PagingData.emptyFlow(isError = true) }
                 }
             }
+            }
         }
     }
 
     private fun statusFlow(scope: CoroutineScope) =
-        selectedAccountTypeFlow.flatMapLatest { accountType ->
-            SearchStatusTimelinePresenter(
-                accountType = accountType,
-                queryFlow = queryFlow,
-            ).createPager(
-                scope = scope,
-            )
+        selectedAccountTypeFlow.flatMapLatest { selectedType ->
+            val loaders: Flow<RemoteLoader<UiTimelineV2>> =
+                if (selectedType == null) {
+                    combine(
+                        allAccountServicesFlow(accountRepository),
+                        queryFlow,
+                        searchSortModeFlow,
+                    ) { sources, query, order ->
+                        if (query.isBlank()) {
+                            notSupported()
+                        } else {
+                            FederatedSearchLoader(
+                                services = sources,
+                                query = query,
+                                order = order,
+                            )
+                        }
+                    }
+                } else {
+                    combine(
+                        accountServiceFlow(accountType = selectedType, repository = accountRepository),
+                        queryFlow,
+                        searchSortModeFlow,
+                    ) { source, query, order ->
+                        if (query.isBlank()) {
+                            notSupported()
+                        } else {
+                            source.searchStatusSorted(query, order)
+                        }
+                    }
+                }
+            TimelinePresenter(loader = loaders).createPager(scope)
         }
 
     @Composable
@@ -135,10 +171,11 @@ public class SearchPresenter(
         val accounts by accountsFlow.collectAsUiState()
         val query by queryFlow.collectAsState()
         val selectedAccount by selectedAccountFlow.collectAsState()
+        val sortMode by searchSortModeFlow.collectAsState()
 
         accounts.onSuccess {
             LaunchedEffect(it.size) {
-                if (selectedAccount == null) {
+                if (selectedAccount == null && !federatedByDefault) {
                     selectedAccountFlow.value =
                         if (accountType is AccountType.Specific) {
                             it.find { profile -> profile.key == accountType.accountKey }
@@ -155,6 +192,7 @@ public class SearchPresenter(
             override val searching = query.isNotEmpty()
             override val accounts = accounts
             override val selectedAccount = selectedAccount
+            override val sortMode = sortMode
 
             override fun search(query: String) {
                 queryFlow.value = query
@@ -167,6 +205,14 @@ public class SearchPresenter(
 
             override fun setAccount(profile: UiProfile) {
                 selectedAccountFlow.value = profile
+            }
+
+            override fun setAllAccounts() {
+                selectedAccountFlow.value = null
+            }
+
+            override fun setSortMode(mode: SearchSortMode) {
+                searchSortModeFlow.value = mode
             }
 
             override fun setAccountKey(key: MicroBlogKey) {
@@ -185,6 +231,13 @@ public interface SearchState {
     public val searching: Boolean
     public val accounts: UiState<ImmutableList<UiProfile>>
     public val selectedAccount: UiProfile?
+    public val sortMode: SearchSortMode
+
+    @WebIgnore
+    public fun setAllAccounts()
+
+    @WebIgnore
+    public fun setSortMode(mode: SearchSortMode)
 
     public fun search(query: String)
 
