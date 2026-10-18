@@ -416,7 +416,7 @@ internal fun SettingsScreen(
                 )
             }
             Text(
-                text = "Flare Reader v3.7-dev",
+                text = "Flare Reader v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier =
