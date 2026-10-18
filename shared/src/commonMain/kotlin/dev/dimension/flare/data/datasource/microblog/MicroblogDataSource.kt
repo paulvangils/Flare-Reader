@@ -35,3 +35,24 @@ public interface MicroblogDataSource {
 
     public suspend fun profileTabs(userKey: MicroBlogKey): ImmutableList<ProfileTab>
 }
+
+/** Search sorting is session-only and does not affect stored timeline data. */
+public enum class SearchSortMode {
+    Latest,
+    Popular,
+}
+
+/** Platforms may implement native server-side ranking for search results. */
+public interface SearchSortAwareDataSource {
+    public fun searchStatus(query: String, mode: SearchSortMode): RemoteLoader<UiTimelineV2>
+}
+
+public fun MicroblogDataSource.searchStatusSorted(
+    query: String,
+    mode: SearchSortMode,
+): RemoteLoader<UiTimelineV2> =
+    if (this is SearchSortAwareDataSource) {
+        searchStatus(query, mode)
+    } else {
+        searchStatus(query)
+    }
