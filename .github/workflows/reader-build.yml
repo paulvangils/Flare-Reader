@@ -14,7 +14,7 @@ permissions:
 # Keep this in sync with Android's versionName. Increase only when a release
 # is ready to be published; existing version tags are never silently replaced.
 env:
-  FLARE_RELEASE_VERSION: '3.7.2'
+  FLARE_RELEASE_VERSION: '3.7.3'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-v3_7_validation
