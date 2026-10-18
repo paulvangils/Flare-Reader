@@ -2,6 +2,7 @@ package dev.dimension.flare.data.datasource.bluesky
 
 import androidx.paging.ExperimentalPagingApi
 import app.bsky.feed.SearchPostsQueryParams
+import dev.dimension.flare.data.datasource.microblog.SearchSortMode
 import dev.dimension.flare.data.datasource.microblog.paging.CacheableRemoteLoader
 import dev.dimension.flare.data.datasource.microblog.paging.PagingRequest
 import dev.dimension.flare.data.datasource.microblog.paging.PagingResult
@@ -15,11 +16,13 @@ internal class SearchStatusRemoteMediator(
     private val getService: suspend () -> BlueskyService,
     private val accountKey: MicroBlogKey,
     private val query: String,
+    private val mode: SearchSortMode = SearchSortMode.Latest,
 ) : CacheableRemoteLoader<UiTimelineV2> {
     override val pagingKey: String =
         buildString {
             append("search_")
             append(query)
+            append(mode.name)
             append(accountKey.toString())
         }
 
@@ -41,6 +44,7 @@ internal class SearchStatusRemoteMediator(
                         SearchPostsQueryParams(
                             q = query,
                             limit = pageSize.toLong(),
+                            sort = if (mode == SearchSortMode.Latest) "latest" else "top",
                         ),
                     )
                 }
@@ -51,6 +55,7 @@ internal class SearchStatusRemoteMediator(
                             q = query,
                             limit = pageSize.toLong(),
                             cursor = request.nextKey,
+                            sort = if (mode == SearchSortMode.Latest) "latest" else "top",
                         ),
                     )
                 }
