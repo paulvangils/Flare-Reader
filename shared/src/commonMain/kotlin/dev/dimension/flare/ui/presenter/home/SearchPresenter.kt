@@ -93,8 +93,7 @@ public class SearchPresenter(
 
     private val selectedAccountTypeFlow: Flow<AccountType?> by lazy {
         selectedAccountFlow.map { profile ->
-            profile?.let { AccountType.Specific(it.key) }
-                ?: accountType.takeUnless { federatedByDefault }
+            resolveSearchAccountScope(accountType, profile?.key, federatedByDefault)
         }
     }
 
@@ -223,6 +222,18 @@ public class SearchPresenter(
         }
     }
 }
+
+/**
+ * A regular search starts on all accounts, independent of Discover's active account.
+ * A user-selected account is the only reason to scope results to one platform/account.
+ */
+internal fun resolveSearchAccountScope(
+    initialAccountType: AccountType,
+    selectedAccountKey: MicroBlogKey?,
+    federatedByDefault: Boolean,
+): AccountType? =
+    selectedAccountKey?.let { AccountType.Specific(it) }
+        ?: initialAccountType.takeUnless { federatedByDefault }
 
 @Immutable
 public interface SearchState {
