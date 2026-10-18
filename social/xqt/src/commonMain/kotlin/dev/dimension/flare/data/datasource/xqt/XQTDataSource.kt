@@ -17,6 +17,8 @@ import dev.dimension.flare.data.datasource.microblog.NotificationTimelineDataSou
 import dev.dimension.flare.data.datasource.microblog.PostEvent
 import dev.dimension.flare.data.datasource.microblog.ProfileTab
 import dev.dimension.flare.data.datasource.microblog.RetweetersDataSource
+import dev.dimension.flare.data.datasource.microblog.SearchSortAwareDataSource
+import dev.dimension.flare.data.datasource.microblog.SearchSortMode
 import dev.dimension.flare.data.datasource.microblog.datasource.ArticleDataSource
 import dev.dimension.flare.data.datasource.microblog.datasource.ListDataSource
 import dev.dimension.flare.data.datasource.microblog.datasource.NotificationDataSource
@@ -114,6 +116,7 @@ internal class XQTDataSource(
     override val accountKey: MicroBlogKey,
     sourceCredentialFlow: Flow<XQTCredential>,
 ) : AuthenticatedMicroblogDataSource,
+    SearchSortAwareDataSource,
     NotificationTimelineDataSource,
     ComposeDataSource,
     NotificationDataSource,
@@ -721,6 +724,14 @@ internal class XQTDataSource(
             service,
             accountKey,
             query,
+        )
+
+    override fun searchStatus(query: String, mode: SearchSortMode) =
+        SearchStatusPagingSource(
+            service = service,
+            accountKey = accountKey,
+            query = query,
+            mode = mode,
         )
 
     override fun searchUser(query: String) =
