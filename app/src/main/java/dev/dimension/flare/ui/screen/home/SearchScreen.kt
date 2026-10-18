@@ -29,6 +29,7 @@ import compose.icons.fontawesomeicons.Solid
 import compose.icons.fontawesomeicons.solid.Robot
 import dev.dimension.flare.R
 import dev.dimension.flare.common.isRefreshing
+import dev.dimension.flare.data.datasource.microblog.SearchSortMode
 import dev.dimension.flare.model.AccountType
 import dev.dimension.flare.model.MicroBlogKey
 import dev.dimension.flare.ui.component.AvatarComponent
@@ -84,6 +85,8 @@ internal fun SearchScreen(
             initialQuery,
         )
     }
+    val allowFederatedSearch =
+        accountType is AccountType.Specific && !initialQuery.startsWith("quoted_tweet_id:")
     val lazyListState = rememberLazyStaggeredGridState()
     val isBigScreen = isBigScreen()
     val showAskAi = LocalTimelineAppearance.current.aiConfig.agent
@@ -208,9 +211,9 @@ internal fun SearchScreen(
                     state = lazyListState,
                     contentPadding = contentPadding,
                 ) {
-                    if (isBigScreen) {
+                    if (isBigScreen || allowFederatedSearch) {
                         state.searchState.accounts.onSuccess { accounts ->
-                            if (accounts.size > 1) {
+                            if (accounts.size > 1 || allowFederatedSearch) {
                                 item(
                                     span = StaggeredGridItemSpan.FullLine,
                                 ) {
@@ -218,6 +221,15 @@ internal fun SearchScreen(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         modifier = Modifier.padding(bottom = 8.dp),
                                     ) {
+                                        if (allowFederatedSearch) {
+                                            item {
+                                                FilterChip(
+                                                    selected = state.searchState.selectedAccount == null,
+                                                    onClick = state.searchState::setAllAccounts,
+                                                    label = { Text("Alle accounts") },
+                                                )
+                                            }
+                                        }
                                         items(accounts.size) { index ->
                                             val profile = accounts[index]
                                             FilterChip(
@@ -237,6 +249,29 @@ internal fun SearchScreen(
                                             )
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                    if (allowFederatedSearch) {
+                        item(span = StaggeredGridItemSpan.FullLine) {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            ) {
+                                item {
+                                    FilterChip(
+                                        selected = state.searchState.sortMode == SearchSortMode.Latest,
+                                        onClick = { state.searchState.setSortMode(SearchSortMode.Latest) },
+                                        label = { Text("Meest recent") },
+                                    )
+                                }
+                                item {
+                                    FilterChip(
+                                        selected = state.searchState.sortMode == SearchSortMode.Popular,
+                                        onClick = { state.searchState.setSortMode(SearchSortMode.Popular) },
+                                        label = { Text("Populairst") },
+                                    )
                                 }
                             }
                         }
@@ -290,7 +325,12 @@ private fun presenter(
     val searchBarState = searchBarPresenter(initialQuery)
     val searchState =
         remember(initialQuery, accountType) {
-            SearchPresenter(accountType = accountType, initialQuery)
+            SearchPresenter(
+                accountType = accountType,
+                initialQuery = initialQuery,
+                federatedByDefault =
+                    accountType is AccountType.Specific && !initialQuery.startsWith("quoted_tweet_id:"),
+            )
         }.invoke()
 
     object : SearchBarState by searchBarState {
