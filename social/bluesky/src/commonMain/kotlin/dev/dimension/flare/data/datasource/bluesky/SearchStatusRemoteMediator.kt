@@ -2,6 +2,7 @@ package dev.dimension.flare.data.datasource.bluesky
 
 import androidx.paging.ExperimentalPagingApi
 import app.bsky.feed.SearchPostsQueryParams
+import app.bsky.feed.SearchPostsSort
 import dev.dimension.flare.data.datasource.microblog.SearchSortMode
 import dev.dimension.flare.data.datasource.microblog.paging.CacheableRemoteLoader
 import dev.dimension.flare.data.datasource.microblog.paging.PagingRequest
@@ -44,7 +45,7 @@ internal class SearchStatusRemoteMediator(
                         SearchPostsQueryParams(
                             q = query,
                             limit = pageSize.toLong(),
-                            sort = if (mode == SearchSortMode.Latest) "latest" else "top",
+                            sort = if (mode == SearchSortMode.Latest) SearchPostsSort.Latest else SearchPostsSort.Top,
                         ),
                     )
                 }
@@ -55,7 +56,7 @@ internal class SearchStatusRemoteMediator(
                             q = query,
                             limit = pageSize.toLong(),
                             cursor = request.nextKey,
-                            sort = if (mode == SearchSortMode.Latest) "latest" else "top",
+                            sort = if (mode == SearchSortMode.Latest) SearchPostsSort.Latest else SearchPostsSort.Top,
                         ),
                     )
                 }
