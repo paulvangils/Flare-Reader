@@ -1058,6 +1058,8 @@ internal fun StatusActions(
                         number =
                             if (xqtRetweet != null) {
                                 UiNumber(totalXqtRepostCount(xqtRetweet.count, quoteCount ?: 0L))
+                            } else if (blueskyReblog != null) {
+                                UiNumber(totalXqtRepostCount(blueskyReblog.count, quoteCount ?: 0L))
                             } else {
                                 action.displayItem.count
                             },
