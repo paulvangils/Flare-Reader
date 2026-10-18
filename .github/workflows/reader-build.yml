@@ -83,7 +83,7 @@ jobs:
       - name: Build debug APK
         env:
           BUILD_NUMBER: ${{ github.run_number }}
-          BUILD_VERSION: reader-v3-${{ github.run_number }}
+          BUILD_VERSION: 3.7.2
         run: ./gradlew :app:assembleDebug --stacktrace
 
       - name: Upload debug APK
