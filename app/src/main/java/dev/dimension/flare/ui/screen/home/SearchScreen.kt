@@ -86,7 +86,7 @@ internal fun SearchScreen(
         )
     }
     val allowFederatedSearch =
-        accountType is AccountType.Specific && !initialQuery.startsWith("quoted_tweet_id:")
+        !initialQuery.startsWith("quoted_tweet_id:")
     val lazyListState = rememberLazyStaggeredGridState()
     val isBigScreen = isBigScreen()
     val showAskAi = LocalTimelineAppearance.current.aiConfig.agent
@@ -329,7 +329,7 @@ private fun presenter(
                 accountType = accountType,
                 initialQuery = initialQuery,
                 federatedByDefault =
-                    accountType is AccountType.Specific && !initialQuery.startsWith("quoted_tweet_id:"),
+                    !initialQuery.startsWith("quoted_tweet_id:"),
             )
         }.invoke()
 
