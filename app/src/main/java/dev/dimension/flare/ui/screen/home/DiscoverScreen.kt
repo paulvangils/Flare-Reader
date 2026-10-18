@@ -23,7 +23,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +43,7 @@ import dev.dimension.flare.common.isRefreshing
 import dev.dimension.flare.common.isSuccess
 import dev.dimension.flare.common.onLoading
 import dev.dimension.flare.common.onSuccess
+import dev.dimension.flare.data.datasource.microblog.SearchSortMode
 import dev.dimension.flare.data.model.TimelineDisplayMode
 import dev.dimension.flare.model.AccountType
 import dev.dimension.flare.model.MicroBlogKey
@@ -108,7 +108,7 @@ internal fun DiscoverScreen(
                         state.commitSearch(it)
                     },
                     trailingIcon =
-                        state.selectedAccount?.let { account ->
+                        if (state.isInSearchMode) null else state.selectedAccount?.let { account ->
                             if (!isBigScreen) {
                                 {
                                     state.accounts.onSuccess { accounts ->
@@ -200,7 +200,58 @@ internal fun DiscoverScreen(
                     state = lazyListState,
                     contentPadding = contentPadding,
                 ) {
-                    if (isBigScreen) {
+                    if (state.isInSearchMode) {
+                        // Search has its own account scope, separate from the Discover feed.
+                        // This control is visible on phones as well as large screens.
+                        state.searchState.accounts.onSuccess { accounts ->
+                            item(span = StaggeredGridItemSpan.FullLine) {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(bottom = 8.dp),
+                                ) {
+                                    item {
+                                        FilterChip(
+                                            selected = state.searchState.selectedAccount == null,
+                                            onClick = state.searchState::setAllAccounts,
+                                            label = { Text("Alle accounts") },
+                                        )
+                                    }
+                                    items(accounts) { profile ->
+                                        FilterChip(
+                                            selected = state.searchState.selectedAccount?.key == profile.key,
+                                            onClick = { state.searchState.setAccount(profile) },
+                                            label = { Text(profile.handle.canonical) },
+                                            leadingIcon = {
+                                                AvatarComponent(data = profile.avatar, size = 18.dp)
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        item(span = StaggeredGridItemSpan.FullLine) {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(bottom = 8.dp),
+                            ) {
+                                item {
+                                    FilterChip(
+                                        selected = state.searchState.sortMode == SearchSortMode.Latest,
+                                        onClick = { state.searchState.setSortMode(SearchSortMode.Latest) },
+                                        label = { Text("Meest recent") },
+                                    )
+                                }
+                                item {
+                                    FilterChip(
+                                        selected = state.searchState.sortMode == SearchSortMode.Popular,
+                                        onClick = { state.searchState.setSortMode(SearchSortMode.Popular) },
+                                        label = { Text("Populairst") },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (!state.isInSearchMode && isBigScreen) {
                         state.accounts.onSuccess { accounts ->
                             if (accounts.size > 1) {
                                 item(
@@ -443,14 +494,11 @@ private fun discoverPresenter() =
         val searchBarState = searchBarPresenter()
         val searchState =
             remember {
-                SearchPresenter(accountType = state.selectedAccountType)
+                SearchPresenter(
+                    accountType = AccountType.Guest,
+                    federatedByDefault = true,
+                )
             }.invoke()
-
-        LaunchedEffect(state.selectedAccount) {
-            state.selectedAccount?.let { profile ->
-                searchState.setAccount(profile)
-            }
-        }
 
         object : DiscoverState by state, SearchBarState by searchBarState {
             val searchState = searchState
@@ -491,6 +539,9 @@ private fun discoverPresenter() =
 
             fun clearSearch() {
                 searchBarState.setQuery("")
+                searchState.search("")
+                searchState.setAllAccounts()
+                searchState.setSortMode(SearchSortMode.Latest)
             }
         }
     }
