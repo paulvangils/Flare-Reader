@@ -988,7 +988,7 @@ private fun PostEvent.Bluesky.Reblog.originalPostUrl(): String =
 
 // The number beside the X repost icon includes quotes, but the retweeter list and
 // the post action's own count must continue to use only ordinary retweets.
-internal fun totalXqtRepostCount(retweets: Long, quotes: Long): Long =
+internal fun totalRepostCount(retweets: Long, quotes: Long): Long =
     retweets + quotes
 
 private fun PostEvent.XQT.Retweet.retweetersUrl(): String =
@@ -1057,9 +1057,9 @@ internal fun StatusActions(
                                 ?: FontAwesomeIcons.Solid.Ellipsis,
                         number =
                             if (xqtRetweet != null) {
-                                UiNumber(totalXqtRepostCount(xqtRetweet.count, quoteCount ?: 0L))
+                                UiNumber(totalRepostCount(xqtRetweet.count, quoteCount ?: 0L))
                             } else if (blueskyReblog != null) {
-                                UiNumber(totalXqtRepostCount(blueskyReblog.count, quoteCount ?: 0L))
+                                UiNumber(totalRepostCount(blueskyReblog.count, quoteCount ?: 0L))
                             } else {
                                 action.displayItem.count
                             },
