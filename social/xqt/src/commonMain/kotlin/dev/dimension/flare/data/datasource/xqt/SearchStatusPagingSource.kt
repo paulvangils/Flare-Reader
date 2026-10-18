@@ -4,6 +4,7 @@ import dev.dimension.flare.common.encodeJson
 import dev.dimension.flare.data.database.cache.mapper.cursor
 import dev.dimension.flare.data.database.cache.mapper.isBottomEnd
 import dev.dimension.flare.data.database.cache.mapper.tweets
+import dev.dimension.flare.data.datasource.microblog.SearchSortMode
 import dev.dimension.flare.data.datasource.microblog.paging.PagingRequest
 import dev.dimension.flare.data.datasource.microblog.paging.PagingResult
 import dev.dimension.flare.data.datasource.microblog.paging.RemoteLoader
@@ -19,6 +20,7 @@ internal class SearchStatusPagingSource(
     private val service: XQTService,
     private val accountKey: MicroBlogKey,
     private val query: String,
+    private val mode: SearchSortMode = SearchSortMode.Popular,
 ) : RemoteLoader<UiTimelineV2> {
     override suspend fun load(
         pageSize: Int,
@@ -48,6 +50,7 @@ internal class SearchStatusPagingSource(
                             rawQuery = query,
                             count = pageSize.toLong(),
                             cursor = cursor,
+                            product = if (mode == SearchSortMode.Latest) "Latest" else "Top",
                         ).encodeJson(),
                     referer = "https://${accountKey.host}/search?q=${query.encodeURLQueryComponent()}",
                 ).body()
