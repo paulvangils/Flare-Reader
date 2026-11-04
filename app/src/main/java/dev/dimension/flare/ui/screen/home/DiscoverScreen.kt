@@ -3,6 +3,7 @@ package dev.dimension.flare.ui.screen.home
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -10,11 +11,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
@@ -22,6 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -406,15 +411,80 @@ internal fun DiscoverScreen(
                                                 }
                                             },
                                         ) { suggestion ->
+                                            var showConnections by remember(suggestion.profile.key) {
+                                                mutableStateOf(false)
+                                            }
                                             AdaptiveOutlinedCard(modifier = Modifier.width(256.dp)) {
-                                                CommonStatusHeaderComponent(
-                                                    modifier = Modifier.padding(8.dp),
-                                                    data = suggestion,
-                                                    onUserClick = {
-                                                        onUserClick(
-                                                            AccountType.Specific(blueskyKey),
-                                                            suggestion.key,
+                                                Column {
+                                                    CommonStatusHeaderComponent(
+                                                        modifier = Modifier.padding(8.dp),
+                                                        data = suggestion.profile,
+                                                        onUserClick = {
+                                                            onUserClick(
+                                                                AccountType.Specific(blueskyKey),
+                                                                suggestion.profile.key,
+                                                            )
+                                                        },
+                                                    )
+                                                    TextButton(
+                                                        onClick = { showConnections = true },
+                                                        modifier = Modifier.padding(horizontal = 6.dp),
+                                                    ) {
+                                                        val count = suggestion.followedBy.size
+                                                        Text(
+                                                            text =
+                                                                if (count == 1) {
+                                                                    "Via 1 account dat je volgt · Bekijk wie"
+                                                                } else {
+                                                                    "Via $count accounts die je volgt · Bekijk wie"
+                                                                },
+                                                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                                                         )
+                                                    }
+                                                }
+                                            }
+                                            if (showConnections) {
+                                                AlertDialog(
+                                                    onDismissRequest = { showConnections = false },
+                                                    title = { Text("Wie volgt dit account?") },
+                                                    text = {
+                                                        Column(
+                                                            modifier = Modifier.verticalScroll(rememberScrollState()),
+                                                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                                                        ) {
+                                                            Text(
+                                                                text = "Deze connecties zijn gevonden binnen de accounts die Flare heeft gecontroleerd.",
+                                                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                                            )
+                                                            suggestion.followedBy.forEach { followedAccount ->
+                                                                Row(
+                                                                    modifier = Modifier
+                                                                        .fillMaxWidth()
+                                                                        .clickable {
+                                                                            showConnections = false
+                                                                            onUserClick(
+                                                                                AccountType.Specific(blueskyKey),
+                                                                                followedAccount.key,
+                                                                            )
+                                                                        }.padding(vertical = 5.dp),
+                                                                    verticalAlignment = Alignment.CenterVertically,
+                                                                ) {
+                                                                    AvatarComponent(
+                                                                        data = followedAccount.avatar,
+                                                                        size = 32.dp,
+                                                                    )
+                                                                    Text(
+                                                                        text = followedAccount.handle.canonical,
+                                                                        modifier = Modifier.padding(start = 12.dp),
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    },
+                                                    confirmButton = {
+                                                        TextButton(onClick = { showConnections = false }) {
+                                                            Text("Sluiten")
+                                                        }
                                                     },
                                                 )
                                             }
