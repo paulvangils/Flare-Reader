@@ -366,6 +366,64 @@ internal fun DiscoverScreen(
                             }
                         }
 
+                        // Bluesky recommendations are independent of the X/Discover account.
+                        state.blueskyAccountKey?.let { blueskyKey ->
+                            if (state.blueskySuggestions.isLoading || state.blueskySuggestions.isSuccess()) {
+                                item(span = StaggeredGridItemSpan.FullLine) {
+                                    ListItem(
+                                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                        elevation = ListItemDefaults.elevation(),
+                                        content = {
+                                            androidx.compose.foundation.layout.Column {
+                                                Text(text = "Bluesky – aanbevolen accounts")
+                                                Text(
+                                                    text = "Gevolgd door mensen die jij volgt",
+                                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
+                                item(span = StaggeredGridItemSpan.FullLine) {
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier =
+                                            Modifier.let {
+                                                if (!isBigScreen &&
+                                                    LocalTimelineAppearance.current.timelineDisplayMode == TimelineDisplayMode.Plain
+                                                ) {
+                                                    it.padding(horizontal = screenHorizontalPadding)
+                                                } else {
+                                                    it
+                                                }
+                                            },
+                                    ) {
+                                        items(
+                                            state.blueskySuggestions,
+                                            loadingContent = {
+                                                AdaptiveOutlinedCard(modifier = Modifier.width(256.dp)) {
+                                                    UserPlaceholder(modifier = Modifier.padding(8.dp))
+                                                }
+                                            },
+                                        ) { suggestion ->
+                                            AdaptiveOutlinedCard(modifier = Modifier.width(256.dp)) {
+                                                CommonStatusHeaderComponent(
+                                                    modifier = Modifier.padding(8.dp),
+                                                    data = suggestion,
+                                                    onUserClick = {
+                                                        onUserClick(
+                                                            AccountType.Specific(blueskyKey),
+                                                            suggestion.key,
+                                                        )
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         state.hashtags.onSuccess {
                             item(
                                 span = StaggeredGridItemSpan.FullLine,
