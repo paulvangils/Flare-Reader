@@ -71,4 +71,45 @@ class FollowingBasedSuggestionsLoaderTest {
             ).isEmpty(),
         )
     }
+
+    @Test
+    fun remembersExactlyWhichFollowedAccountsRecommendedEachProfile() {
+        val friendOne = user("friend-one")
+        val friendTwo = user("friend-two")
+        val followed = user("already-followed")
+        val suggested = user("candidate")
+        val ranked = rankFollowGraphSuggestionsWithConnections(
+            ownKey = user("me").key,
+            alreadyFollowed = listOf(friendOne, friendTwo, followed),
+            seeds = listOf(friendOne, friendTwo),
+            followedBySeeds = listOf(
+                listOf(suggested, suggested, followed),
+                listOf(suggested, user("other")),
+            ),
+            limit = 10,
+        )
+        val match = ranked.first { it.profile.key == suggested.key }
+        assertEquals(
+            listOf(friendOne.key, friendTwo.key),
+            match.followedBy.map { it.key },
+        )
+        assertEquals(2, match.followedBy.size)
+        assertTrue(ranked.none { it.profile.key == followed.key })
+    }
+
+    @Test
+    fun namesReflectOnlyVerifiedConnectionsWithinSample() {
+        val friendOne = user("friend-one")
+        val friendTwo = user("friend-two")
+        val candidate = user("candidate")
+        val ranked = rankFollowGraphSuggestionsWithConnections(
+            ownKey = user("me").key,
+            alreadyFollowed = listOf(friendOne, friendTwo),
+            seeds = listOf(friendOne, friendTwo),
+            followedBySeeds = listOf(listOf(candidate), emptyList()),
+            limit = 10,
+        )
+        assertEquals(listOf(friendOne.key), ranked.single().followedBy.map { it.key })
+    }
+
 }
