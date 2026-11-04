@@ -5,7 +5,10 @@ import dev.dimension.flare.data.datasource.microblog.paging.PagingRequest
 import dev.dimension.flare.data.datasource.microblog.paging.PagingResult
 import dev.dimension.flare.data.datasource.microblog.paging.RemoteLoader
 import dev.dimension.flare.model.MicroBlogKey
+import androidx.compose.runtime.Immutable
 import dev.dimension.flare.ui.model.UiProfile
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -18,10 +21,17 @@ import kotlinx.coroutines.coroutineScope
  * those people. Exclude everyone already followed and rank common connections
  * ahead of one-off suggestions. One bounded page feeds the Discover carousel.
  */
+@Immutable
+public data class FollowGraphSuggestion(
+    val profile: UiProfile,
+    /** People followed by the signed-in user who also follow this profile. */
+    val followedBy: ImmutableList<UiProfile>,
+)
+
 internal class FollowingBasedSuggestionsLoader(
     private val service: MicroblogDataSource,
     private val accountKey: MicroBlogKey,
-) : RemoteLoader<UiProfile> {
+) : RemoteLoader<FollowGraphSuggestion> {
     override suspend fun load(
         pageSize: Int,
         request: PagingRequest,
@@ -70,8 +80,9 @@ internal class FollowingBasedSuggestionsLoader(
         }
 
         return PagingResult(
-            data = rankFollowGraphSuggestions(
+            data = rankFollowGraphSuggestionsWithConnections(
                 ownKey = accountKey,
+                seeds = seeds,
                 alreadyFollowed = followed,
                 followedBySeeds = followedBySeeds,
                 limit = pageSize.coerceIn(12, MAX_RECOMMENDATIONS),
@@ -113,4 +124,37 @@ internal fun rankFollowGraphSuggestions(
         )
         .take(limit.coerceAtLeast(0))
         .map { it.first }
+}
+
+/**
+ * Retains the actual seed-account identities instead of losing them after
+ * ranking. Each matched connection is a verified "seed follows candidate" edge
+ * returned from Bluesky; only the bounded, inspected portion of the graph counts.
+ */
+internal fun rankFollowGraphSuggestionsWithConnections(
+    ownKey: MicroBlogKey,
+    alreadyFollowed: List<UiProfile>,
+    seeds: List<UiProfile>,
+    followedBySeeds: List<List<UiProfile>>,
+    limit: Int,
+): List<FollowGraphSuggestion> {
+    val excluded = alreadyFollowed.mapTo(mutableSetOf(ownKey)) { it.key }
+    val connections = linkedMapOf<MicroBlogKey, LinkedHashMap<MicroBlogKey, UiProfile>>()
+    seeds.zip(followedBySeeds).forEach { (seed, followedBySeed) ->
+        followedBySeed.distinctBy { it.key }.forEach { candidate ->
+            if (candidate.key !in excluded) {
+                connections.getOrPut(candidate.key) { linkedMapOf() }[seed.key] = seed
+            }
+        }
+    }
+
+    return rankFollowGraphSuggestions(
+        ownKey = ownKey,
+        alreadyFollowed = alreadyFollowed,
+        followedBySeeds = followedBySeeds,
+        limit = limit,
+    ).mapNotNull { profile ->
+        val followedBy = connections[profile.key]?.values?.toImmutableList()
+        followedBy?.let { FollowGraphSuggestion(profile, it) }
+    }
 }
