@@ -35,7 +35,7 @@ internal class FollowingBasedSuggestionsLoader(
     override suspend fun load(
         pageSize: Int,
         request: PagingRequest,
-    ): PagingResult<UiProfile> {
+    ): PagingResult<FollowGraphSuggestion> {
         if (request !is PagingRequest.Refresh) {
             return PagingResult(endOfPaginationReached = true)
         }
