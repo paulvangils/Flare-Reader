@@ -18,7 +18,9 @@ env:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-v3_7_validation
-  cancel-in-progress: false
+  # On the development branch, validate the newest commit rather than
+  # finishing obsolete builds before the current one can start.
+  cancel-in-progress: ${{ github.ref == 'refs/heads/reader-v3.7-work' }}
 
 jobs:
   build:
