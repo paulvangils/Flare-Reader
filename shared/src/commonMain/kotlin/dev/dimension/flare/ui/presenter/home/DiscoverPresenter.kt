@@ -214,7 +214,7 @@ public class DiscoverPresenter : PresenterBase<DiscoverState>() {
 @Immutable
 public interface DiscoverState {
     public val users: PagingState<UiProfile>
-    public val blueskySuggestions: PagingState<UiProfile>
+    public val blueskySuggestions: PagingState<FollowGraphSuggestion>
     public val blueskyAccountKey: MicroBlogKey?
     public val status: PagingState<UiTimelineV2>
     public val hashtags: PagingState<UiHashtag>
