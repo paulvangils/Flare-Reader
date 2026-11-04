@@ -43,6 +43,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 
@@ -85,6 +86,36 @@ public class DiscoverPresenter : PresenterBase<DiscoverState>() {
         }
     }
 
+    /** Prefer the first configured Bluesky account; this is independent of the X/Discover selection. */
+    private val blueskyAccountKeyFlow: Flow<MicroBlogKey?> by lazy {
+        accountRepository.allAccounts
+            .map { accounts ->
+                accounts.firstOrNull {
+                    it.platformId == "Bluesky" && it.platformAvailable
+                }?.accountKey
+            }.distinctUntilChanged()
+    }
+
+    private val blueskySuggestionsFlow by lazy {
+        blueskyAccountKeyFlow.flatMapLatest { accountKey ->
+            if (accountKey == null) {
+                PagingData.emptyFlow(isError = false)
+            } else {
+                accountServiceFlow(
+                    accountType = AccountType.Specific(accountKey),
+                    repository = accountRepository,
+                ).flatMapLatest { dataSource ->
+                    Pager(config = pagingConfig) {
+                        FollowingBasedSuggestionsLoader(
+                            service = dataSource,
+                            accountKey = accountKey,
+                        ).toPagingSource()
+                    }.flow
+                }
+            }
+        }
+    }
+
     private val usersFlow by lazy {
         selectedAccountTypeFlow.flatMapLatest { accountType ->
             accountServiceFlow(accountType = accountType, repository = accountRepository)
@@ -122,6 +153,11 @@ public class DiscoverPresenter : PresenterBase<DiscoverState>() {
         val accounts by accountsFlow.collectAsUiState()
         val selectedAccount by selectedAccountFlow.collectAsState()
         val selectedAccountType by selectedAccountTypeFlow.collectAsState(AccountType.Guest)
+        val blueskyAccountKey by blueskyAccountKeyFlow.collectAsState(initial = null)
+        val blueskySuggestions =
+            remember(blueskySuggestionsFlow, scope) {
+                blueskySuggestionsFlow.cachedIn(scope)
+            }.collectAsLazyPagingItems().toPagingState()
         val users =
             remember(usersFlow, scope) {
                 usersFlow.cachedIn(scope)
@@ -147,6 +183,8 @@ public class DiscoverPresenter : PresenterBase<DiscoverState>() {
 
         return object : DiscoverState {
             override val users = users
+            override val blueskySuggestions = blueskySuggestions
+            override val blueskyAccountKey = blueskyAccountKey
             override val status = status
             override val hashtags = hashtags
             override val selectedAccount = selectedAccount
@@ -155,6 +193,7 @@ public class DiscoverPresenter : PresenterBase<DiscoverState>() {
 
             override suspend fun refreshSuspend() {
                 users.refreshSuspend()
+                blueskySuggestions.refreshSuspend()
                 status.refreshSuspend()
                 hashtags.refreshSuspend()
             }
@@ -175,6 +214,8 @@ public class DiscoverPresenter : PresenterBase<DiscoverState>() {
 @Immutable
 public interface DiscoverState {
     public val users: PagingState<UiProfile>
+    public val blueskySuggestions: PagingState<UiProfile>
+    public val blueskyAccountKey: MicroBlogKey?
     public val status: PagingState<UiTimelineV2>
     public val hashtags: PagingState<UiHashtag>
     public val accounts: UiState<ImmutableList<UiProfile>>
